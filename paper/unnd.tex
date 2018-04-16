@@ -1,0 +1,145 @@
+\documentclass{article}[12px]
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{amssymb}
+\usepackage{harpoon}
+
+\newcommand{\ora}[1]{\overrightarrow{#1\vphantom{j}}}
+\newcommand{\ola}[1]{\overleftarrow{#1\vphantom{j}}}
+
+\title{Unitary Neural Network Design}
+\author{Lukas Palmer \\ \texttt{lp920915@ohio.edu}}
+\date{April 10, 2018}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Recent research has successfully used deep learning techniques to design and guide search for neural network architectures. Neural networks have learned through reinforcement learning to design novel and high-performing network architectures, including convolutional networks and RNN cells\cite{DBLP:journals/corr/ZophL16}. Current research on the subject generates neural network architectures which are then trained without further architectural modification.
+
+It has been shown that animal brains depend on the formation and integration of new neurons to learn complex navigational tasks\cite{Dupret08}. Additionally, the human hippocampus is involved in many important cognitive processes and is the only site of neurogenesis in adults. This suggests that there may be machine learning tasks where it is helpful during training to modify a neural network not only by optimizing its weights, but also by incorporating new units into its structure.
+
+This project attempts to extend the existing research in automatic design of neural networks to continuously modify neural networks during training. Neural networks are typically structured in layers for organization and acceleration with massively parallel hardware. Instead, the neural network being modified is made to be an arbitary DAG of neurons. This allows new units to be integrated into the network in arbitary ways, at the cost of forfeiting speedup via parallelism. This destructuring allows connectivity across the network graph to be more precisely modified by adding individual units instead of layers. In general, this project explores the use of a neural network-based reinforcement learning agent ('designer network') to modify a DAG of neurons ('primary network') while it is trained in a supervised learning setting.
+
+\section{Primary network}
+
+The primary network is an unstructured feedforward neural network, a directed acyclic graph of neurons. Formally, the network has \(N\) units, each with a bias \(b_i\). Unit \(i\) receives input from units with indices in the set \(c_i\), with \(0 \le i < j < N\) for all \(j \in c_i\). The weight of a connection from unit \(j\) to unit \(i\) is noted as \(w_{ij}\). List \(F_i\) contains the indices of the units that have forward connections into unit \(i\) in ascending order, and list \(B_i\) contains the indices of the units that have backward connections into unit \(i\) in descending order. The activation of unit \(i\) is calculated as follows, using some nonlinearity \(\phi\):
+
+\begin{equation}
+a_i = \phi(\sum_{j \in F_i}{w_{ij}a_{j}} + b_i)
+\end{equation}
+
+The first \(I\) units (\(1 \le i \le I\)) and last \(O\) units (\(N - O < i \le N\)) are the inputs and outputs of the network, respectively, so it can be used as a function \(\mathbb{R}^I \mapsto \mathbb{R}^O\). The activations of the input units are directly set to the input values, and the output units have no nonlinearity.
+
+This formalism serves only to give units an ordering which is used to compute the forward and backward pass, and is helpful later when the designer network traverses the primary network's structure.
+
+\section{Designer network}
+
+The designer network is intended to tune the structure of the primary network during training, which can be viewed as a reinforcement learning problem where actions correspond to structural modifications, such as connection of two neurons by a weight or the integration of a new unit into the network. The following modifications of the primary network are made available:
+
+\begin{center}
+  \begin{tabular}{| l | p{7cm} |}
+    \hline
+    \(CON(i, j)\) & Add a weight from unit \(i\) to unit \(j\) \\
+    \(DISCON(i, j)\) & Remove the weight from unit \(i\) to unit \(j\). \\
+    \(ADDUNIT(i, j)\) & Integrate a new unit \(k\) into the network, with a weight from \(i\) to \(k\) and from \(k\) to \(j\). \\
+    \(DELUNIT(i)\) & Delete unit \(i\) by removing all inbound and outbound weights. \\
+    \(NOOP()\) & Do not modify the network. \\
+    \hline
+  \end{tabular}
+\end{center}
+
+The primary network is trained on a supervised learning task until the change in testing loss between epochs is below some threshold \(\Delta_{loss}\). At this point, the designer agent takes a modification action, and the primary network is again trained until the testing loss does not change by the threshold. Training until loss once again converges is considered a single time step of the reinforcement learning task, with the reward received being equal to the decrease in test loss of the primary network between steps.
+
+Using a minibatch of size \(M\) from the training data, the designer agent observes the activations \(\hat{\alpha}_i\) and objective gradients \(\hat{\delta}_i\) of unit \(i\) for all units in the primary network. To process this information, the designer network traverses the graph of the primary network, generating 'forward' and 'backward' representations for each node. These representations are fed into a feedforward network for each primary unit which generates probabilities of using that unit as a parameter for the available actions. The input and output representations are then used to calculate the probabilities of taking each action.
+
+The forward representations of a unit are calculated from its minibatch information and the representations of the units that connect to it, which are transformed into a fixed size feature vector using an RNN with GRU cells. \(GRU(\cdot)\) is the forward pass for an RNN with gated recurrent units:
+
+\begin{equation}
+  z_t = \sigma(W_zx_t + U_zh_{t-1} + b_z)
+\end{equation}
+\begin{equation}
+  r_t = \sigma(W_rx_t + U_rh_{t-1} + b_r)
+\end{equation}
+\begin{equation}
+  h_t = (1-z_t) \circ h_t + z_t \circ tanh(W_hx_t + U_h(r_t \circ h_{t-1}) + b_h)
+\end{equation}
+\begin{equation}
+  h_t = \mathbf{0}
+\end{equation}
+\begin{equation}
+  GRU(x_1, \ldots, x_n) = (h_1, \ldots, h_n)
+\end{equation}
+
+\(\ora{\rho}_i\) and \(\ola{\rho}_i\) are the forward and backward representations of unit \(i\), with RNN parameters \ora{\theta} and \ola{\theta}:
+
+\begin{equation}
+  \ora{\phi}_i = GRU_{\ora{\theta}}(\ora{\rho}_{F_{i,1}}, \ldots, \ora{\rho}_{F_{i,|F_i|}})_{|F_i|}
+\end{equation}
+\begin{equation}
+  \ora{\rho}_i = \omega(\ora{\phi}, \hat{\alpha}_i, \hat{\delta}_i)
+\end{equation}
+\begin{equation}
+  \ola{\phi}_i = GRU_{\ola{\theta}}(\ola{\rho}_{B_{i,1}}, \ldots, \ola{\rho}_{B_{i,|B_i|}})_{|B_i|}
+\end{equation}
+\begin{equation}
+  \ola{\rho}_i = \omega(\ola{\phi}_i, \hat{\alpha}_i, \hat{\delta}_i)
+\end{equation}
+
+For each unit \(i\), the forward and backward representations are used to calculate the logits \(\lambda_i\) of the probabilities to use the unit for several roles:
+
+\begin{equation}
+  \lambda_i = \Lambda(\ora{\rho}_i, \ola{\rho}_i)
+\end{equation}
+
+\begin{center}
+  \begin{tabular}{| l | l |}
+    \hline
+    \(j\) & \(softmax(\lambda_{:,j})_i\) \\
+    \hline
+    1 & \(P(CON(i, \cdot) | CON)\) \\
+    2 & \(P(CON(\cdot, i) | CON)\) \\
+    3 & \(P(DISCON(i, \cdot) | DISCON)\) \\
+    4 & \(P(DISCON(\cdot, i) | DISCON)\) \\
+    5 & \(P(ADDUNIT(i, \cdot) | ADDUNIT)\) \\
+    6 & \(P(ADDUNIT(\cdot, i) | ADDUNIT)\) \\
+    7 & \(P(DELUNIT(i) | DELUNIT)\) \\
+    \hline
+  \end{tabular}
+\end{center}
+
+The first \(I\) backward representations and last \(O\) forward representations are then used to calculate the logits \(\beta\) of choosing actions \(CON\), \(DISCON\), \(ADDUNIT\), \(DELUNIT\), and \(NOOP\):
+
+\begin{equation}
+  \ora{\alpha} = GRU_{\ora{\theta}}(\ora{\rho}_{N}, \ldots, \ora{\rho}_{N-O+1})_O
+\end{equation}
+\begin{equation}
+  \ola{\alpha} = GRU_{\ola{\theta}}(\ola{\rho}_1, \ldots, \ola{\rho}_I)_I
+\end{equation}
+\begin{equation}
+  \beta = \kappa(\ora{\alpha}, \ola{\alpha})
+\end{equation}
+
+Inbound and outbound choices for actions involving multiple units are assumed to be independent, so the probability of a specific action takes the form:
+
+\begin{equation}
+  P(CON) = softmax(\beta)_1
+\end{equation}
+\begin{equation}
+  P(CON(i, \cdot) | CON) = softmax(\lambda_{:, 1})_i
+\end{equation}
+\begin{equation}
+  P(CON(\cdot, j) | CON) = softmax(\lambda_{:, 2})_j
+\end{equation}
+\begin{equation}
+  P(CON(i, j)) = P(CON(i, \cdot) | CON) \cdot P(P(CON(\cdot, j)) | CON) \cdot P(CON)
+\end{equation}
+
+Softmax for \(\lambda\) only includes units that are used in the actual computation graph from the first \(I\) to last \(O\) units.
+
+\bibliography{unnd}{}
+\bibliographystyle{plain}
+
+\end{document}
