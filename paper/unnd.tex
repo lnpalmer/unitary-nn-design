@@ -21,11 +21,11 @@ Recent research has successfully used deep learning techniques to design and gui
 
 It has been shown that animal brains depend on the formation and integration of new neurons to learn complex navigational tasks\cite{Dupret08}. Additionally, the human hippocampus is involved in many important cognitive processes and is the only site of neurogenesis in adults. This suggests that there may be machine learning tasks where it is helpful during training to modify a neural network not only by optimizing its weights, but also by incorporating new units into its structure.
 
-This project attempts to extend the existing research in automatic design of neural networks to continuously modify neural networks during training. Neural networks are typically structured in layers for organization and acceleration with massively parallel hardware. Instead, the neural network being modified is made to be an arbitary DAG of neurons. This allows new units to be integrated into the network in arbitary ways, at the cost of forfeiting speedup via parallelism. This destructuring allows connectivity across the network graph to be more precisely modified by adding individual units instead of layers. In general, this project explores the use of a neural network-based reinforcement learning agent ('designer network') to modify a DAG of neurons ('primary network') while it is trained in a supervised learning setting.
+This project attempts to extend the existing research in automatic design of neural networks to continuously modify neural networks during training. Neural networks are typically structured in layers for organization and acceleration with massively parallel hardware. Instead, the neural network being modified is made to be an arbitary DAG of neurons. This allows new units to be integrated into the network in arbitary ways, at the cost of forfeiting speedup via parallelism. This destructuring allows connectivity across the network graph to be more precisely modified by adding individual units instead of layers. In general, this project explores the use of a neural network-based reinforcement learning agent ('designer agent') to modify a DAG of neurons ('primary network') while it is trained in a supervised learning setting.
 
-\section{Primary network}
+\section{Primary network} \label{primary}
 
-The primary network is an unstructured feedforward neural network, a directed acyclic graph of neurons. Formally, the network has \(N\) units, each with a bias \(b_i\). Unit \(i\) receives input from units with indices in the set \(c_i\), with \(0 \le i < j < N\) for all \(j \in c_i\). The weight of a connection from unit \(j\) to unit \(i\) is noted as \(w_{ij}\). List \(F_i\) contains the indices of the units that have forward connections into unit \(i\) in ascending order, and list \(B_i\) contains the indices of the units that have backward connections into unit \(i\) in descending order. The activation of unit \(i\) is calculated as follows, using some nonlinearity \(\phi\):
+The primary network is an unstructured feedforward neural network, a directed acyclic graph of neurons. Formally, the network has \(N\) units, each with a bias \(b_i\). The weight of a connection from unit \(j\) to unit \(i\) is noted as \(w_{ij}\). Weights \(w_{ij}\) can only exist for \(j < i\) to maintain the feedforward property of the network. List \(F_i\) contains the indices of the units that have forward connections into unit \(i\) in ascending order, and list \(B_i\) contains the indices of the units that have backward connections into unit \(i\) in descending order. The activation of unit \(i\) is calculated as follows, using some nonlinearity \(\phi\):
 
 \begin{equation}
 a_i = \phi(\sum_{j \in F_i}{w_{ij}a_{j}} + b_i)
@@ -35,25 +35,29 @@ The first \(I\) units (\(1 \le i \le I\)) and last \(O\) units (\(N - O < i \le 
 
 This formalism serves only to give units an ordering which is used to compute the forward and backward pass, and is helpful later when the designer network traverses the primary network's structure.
 
-\section{Designer network}
+\section{Designer agent} \label{designer}
 
-The designer network is intended to tune the structure of the primary network during training, which can be viewed as a reinforcement learning problem where actions correspond to structural modifications, such as connection of two neurons by a weight or the integration of a new unit into the network. The following modifications of the primary network are made available:
+\subsection{RL environment}
+
+The designer agent is intended to tune the structure of the primary network during training, which can be viewed as a reinforcement learning problem where actions correspond to structural modifications, such as connection of two neurons by a weight or the integration of a new unit into the network. Formally, the reinforcement learning environment's state \(s_t = (P_t, \mathcal{D})\) is a tuple of the primary network at time \(t\), \(P_t\), and the dataset it is trained on \(\mathcal{D}\). \(P_0\) and \(\mathcal{D}\) are randomly sampled at the start of each episode. The designer agent takes an action \(a_t\)  which modifies the structure of the primary network from \(P_t\). The following actions are available to the agent:
 
 \begin{center}
   \begin{tabular}{| l | p{7cm} |}
     \hline
-    \(CON(i, j)\) & Add a weight from unit \(i\) to unit \(j\) \\
+    \(CON(i, j)\) & Add a weight from unit \(i\) to unit \(j\). \\
     \(DISCON(i, j)\) & Remove the weight from unit \(i\) to unit \(j\). \\
-    \(ADDUNIT(i, j)\) & Integrate a new unit \(k\) into the network, with a weight from \(i\) to \(k\) and from \(k\) to \(j\). \\
+    \(ADDUNIT(i, j)\) & Integrate a new unit \(k\) into the network, with a weight from \(i\) to \(k\) and from \(k\) to \(j\). The index of the new  unit \(k\) is randomly chosen from the available units \(i < k < j\). \\
     \(DELUNIT(i)\) & Delete unit \(i\) by removing all inbound and outbound weights. \\
     \(NOOP()\) & Do not modify the network. \\
     \hline
   \end{tabular}
 \end{center}
 
-The primary network is trained on a supervised learning task until the change in testing loss between epochs is below some threshold \(\Delta_{loss}\). At this point, the designer agent takes a modification action, and the primary network is again trained until the testing loss does not change by the threshold. Training until loss once again converges is considered a single time step of the reinforcement learning task, with the reward received being equal to the decrease in test loss of the primary network between steps.
+Before the episode begins, the primary network is trained on a supervised learning task until test objective changes by less than some threshold \(\Delta_{loss}\) between intervals of \(N_{mb}\) minibatches of size \(S_{mb}\) of training. At each timestep \(t\), the modification \(a_t\) is applied to the primary network, and it is trained for \(N_{mb}\) minibatches ending in primary network \(P_{t+1}\). The reward received at each timestep \(r(s_t, a_t, s_{t+1})\) is the change in primary objective on the test subset of \(\mathcal{D}\) from \(P_t\) to \(P_{t+1}\). At time \(t\) the designer agent makes an observation \(o_t\), the activations \(\alpha_i\) and objective gradients \(\delta_i\) of unit \(i\) for all units in the primary network's computation graph, for a minibatch of size \(S_{example}\) randomly sampled from \(\mathcal{D}\). An episode ends after \(N_{step}\) transitions or when the reward is less than \(-\Delta_{div}\), indicating that the primary network has diverged.
 
-Using a minibatch of size \(M\) from the training data, the designer agent observes the activations \(\hat{\alpha}_i\) and objective gradients \(\hat{\delta}_i\) of unit \(i\) for all units in the primary network. To process this information, the designer network traverses the graph of the primary network, generating 'forward' and 'backward' representations for each node. These representations are fed into a feedforward network for each primary unit which generates probabilities of using that unit as a parameter for the available actions. The input and output representations are then used to calculate the probabilities of taking each action.
+\subsection{Designer network}
+
+To process the observation \(o_t\), the designer network traverses the graph of the primary network, generating 'forward' and 'backward' representations for each node. These representations are fed into a feedforward network for each primary unit which generates probabilities of using that unit as a parameter for the available actions. The input and output representations are then used to calculate the probabilities of taking each action.
 
 The forward representations of a unit are calculated from its minibatch information and the representations of the units that connect to it, which are transformed into a fixed size feature vector using an RNN with GRU cells. \(GRU(\cdot)\) is the forward pass for an RNN with gated recurrent units:
 
@@ -73,25 +77,25 @@ The forward representations of a unit are calculated from its minibatch informat
   GRU(x_1, \ldots, x_n) = (h_1, \ldots, h_n)
 \end{equation}
 
-\(\ora{\rho}_i\) and \(\ola{\rho}_i\) are the forward and backward representations of unit \(i\), with RNN parameters \ora{\theta} and \ola{\theta}:
+\(FC(\cdot)\) denotes a fully connected network. \(\ora{\rho}_i\) and \(\ola{\rho}_i\) are the forward and backward representations of unit \(i\), with RNN parameters \ora{\theta} and \ola{\theta}:
 
 \begin{equation}
-  \ora{\phi}_i = GRU_{\ora{\theta}}(\ora{\rho}_{F_{i,1}}, \ldots, \ora{\rho}_{F_{i,|F_i|}})_{|F_i|}
+  \ora{\phi}_i = GRU_{forward}(\ora{\rho}_{F_{i,1}}, \ldots, \ora{\rho}_{F_{i,|F_i|}})_{|F_i|}
 \end{equation}
 \begin{equation}
-  \ora{\rho}_i = \omega(\ora{\phi}, \hat{\alpha}_i, \hat{\delta}_i)
+  \ora{\rho}_i = FC_{forward}(cat(\ora{\phi}, \alpha_i, \delta_i))
 \end{equation}
 \begin{equation}
-  \ola{\phi}_i = GRU_{\ola{\theta}}(\ola{\rho}_{B_{i,1}}, \ldots, \ola{\rho}_{B_{i,|B_i|}})_{|B_i|}
+  \ola{\phi}_i = GRU_{backward}(\ola{\rho}_{B_{i,1}}, \ldots, \ola{\rho}_{B_{i,|B_i|}})_{|B_i|}
 \end{equation}
 \begin{equation}
-  \ola{\rho}_i = \omega(\ola{\phi}_i, \hat{\alpha}_i, \hat{\delta}_i)
+  \ola{\rho}_i = FC_{backward}(cat(\ola{\phi}_i, \alpha_i, \delta_i))
 \end{equation}
 
 For each unit \(i\), the forward and backward representations are used to calculate the logits \(\lambda_i\) of the probabilities to use the unit for several roles:
 
 \begin{equation}
-  \lambda_i = \Lambda(\ora{\rho}_i, \ola{\rho}_i)
+  \lambda_i = FC_{unit}(cat(\ora{\rho}_i, \ola{\rho}_i))
 \end{equation}
 
 \begin{center}
@@ -113,16 +117,22 @@ For each unit \(i\), the forward and backward representations are used to calcul
 The first \(I\) backward representations and last \(O\) forward representations are then used to calculate the logits \(\beta\) of choosing actions \(CON\), \(DISCON\), \(ADDUNIT\), \(DELUNIT\), and \(NOOP\):
 
 \begin{equation}
-  \ora{\alpha} = GRU_{\ora{\theta}}(\ora{\rho}_{N}, \ldots, \ora{\rho}_{N-O+1})_O
+  \ora{\alpha} = GRU_{forward}(\ora{\rho}_{N}, \ldots, \ora{\rho}_{N-O+1})_O
 \end{equation}
 \begin{equation}
-  \ola{\alpha} = GRU_{\ola{\theta}}(\ola{\rho}_1, \ldots, \ola{\rho}_I)_I
+  \ola{\alpha} = GRU_{backward}(\ola{\rho}_1, \ldots, \ola{\rho}_I)_I
 \end{equation}
 \begin{equation}
-  \beta = \kappa(\ora{\alpha}, \ola{\alpha})
+  \beta = FC_{actor}(cat(\ora{\alpha}, \ola{\alpha}))
 \end{equation}
 
-Inbound and outbound choices for actions involving multiple units are assumed to be independent, so the probability of a specific action takes the form:
+The final representations are also used to calculate \(V\), the value estimate of the current state:
+
+\begin{equation}
+  V = FC_{critic}(cat(\ora{\alpha}, \ola{\alpha}))
+\end{equation}
+
+Inbound and outbound probabilities for actions involving multiple units are assumed to be independent given an observation, so the probability of a specific action takes the form:
 
 \begin{equation}
   P(CON) = softmax(\beta)_1
@@ -137,9 +147,62 @@ Inbound and outbound choices for actions involving multiple units are assumed to
   P(CON(i, j)) = P(CON(i, \cdot) | CON) \cdot P(P(CON(\cdot, j)) | CON) \cdot P(CON)
 \end{equation}
 
-Softmax for \(\lambda\) only includes units that are used in the actual computation graph from the first \(I\) to last \(O\) units.
+Softmax for \(\lambda\) only includes units that are used in the actual computation graph from the first \(I\) to last \(O\) units. Together, overall action probabilities and unit role probabilities define the action selection policy \(\pi\) for the designer agent.
+
+\section{Experiments} \label{experiments}
+
+Toy binary functions were generated by sampling sequences of random instructions that modify a vector of bits \(\in\{0, 1\}^I\). Functions are evaluated by applying instructions sequentially on the input, and then finally returning the first O, \(O < I\) bits of the resulting vector. Instructions were randomly sampled from the following list:
+
+\begin{center}
+  \begin{tabular}{| p{4cm} | p{6cm} |}
+    \hline
+    \(OP(i, j, k, l)\), & \\ \(OP\in\{XOR, OR, AND\}\) & Store the elementwise OP of bits \([i, i + l)\) and bits \([j, j + l)\) in bits \([k, k + l)\). \\
+    \(NOT(i, l)\) & Invert bits \([i, i + l)\) in place. \\
+    \(REVERSE(i, l)\) & Reverses the substring of bits \([i, i + l)\). \\
+    \hline
+  \end{tabular}
+\end{center}
+
+The primary network is trained to learn a binary function \(\mathcal{F}\) by taking input \(x \in \{0, 1\}^I\) and emitting a bit vector \(y \in \{0, 1\}^O\). The \(O\) output activations of the primary network are the logit probabilities of emitting one for each bit, and bit probabilities are independent given \(x\), so the log-likelihood of the network emitting the correct bit vector \(l\) is:
+
+\begin{equation}
+  \sum_o log(p(y_o = l_o | x))
+\end{equation}
+
+\begin{equation}
+  p(y_o = 1) = \sigma(a_{(N - O) + o})
+\end{equation}
+
+The objective for a minibatch \(M\) is the average log-likelihood of emitting the correct sequence for each \(x, l\) pair:
+
+\begin{equation}
+  \mathcal{L} = \frac{1}{|M|} \sum_{x, l \in M}\sum_o log(p(y_o = l_o | x))
+\end{equation}
+
+The designer agent is trained using Proximal Policy Optimization \cite{DBLP:journals/corr/SchulmanWDRK17}, with \(\epsilon\)-greedy action selection during training. The following network architectures are used:
+
+\begin{itemize}
+  \item{\(FC_{actor}\) and \(FC_{critic}\) shared a single hidden layer with 50 units.}
+  \item{\(FC_{forward}\) and \(FC_{backward}\) each had a single hidden layer with 40 units.}
+  \item{\(GRU_{forward}\) and \(GRU_{backward}\) each had a single recurrent layer with 60 units.}
+\end{itemize}
+
+Adam \cite{DBLP:journals/corr/KingmaB14} is used to optimize both networks.
 
 \bibliography{unnd}{}
 \bibliographystyle{plain}
+
+\pagebreak
+
+\appendix
+\section{Methods}
+
+\subsection{Primary network sampling}
+
+An uninitialized primary network contains \(N\) unconnected units, with the first \(I\) units used as the input and the last \(O\) units used as the output. A set of \(H\) hidden unit indices \(\mathcal{H}\) is randomly chosen from \((I, N - O]\). Each unit in \([1, I] \cup \mathcal{H}\) is connected forward to \(n_{f, i} \sim \mathcal{U}\{1, 4\}\) units with higher indices in \((N - O, N] \cup \mathcal{H}\). Additionally, each unit in \((N - O, N] \cup \mathcal{H}\) is connected backward to \(n_{b,i} \sim \mathcal{U}\{1, 4\}\) units with lower indices in \([1, I] \cup \mathcal{H}\). Units that do not feed forward into at least one output unit and propagate backward to at least one input unit, directly or indirectly, are 'removed' from the network by removing all of their inbound and outbound connections.
+
+\subsection{Binary function sampling}
+
+Binary functions are generated by randomly sampling a sequence of \(n \sim \mathcal{U}\{10, 40\}\) program steps from \S \ref{experiments}. \(XOR, OR, AND, NOT, REVERSE\) are chosen with equal probability. \(l \sim \mathcal{U}\{2, {I/4}\}\) is sampled first for an input of \(I\) bits. Given \(l\), the rest of the parameters are sampled \(i, j, k \sim \mathcal{U}\{1, I-l+1\}\) to avoid invalid operations.
 
 \end{document}
