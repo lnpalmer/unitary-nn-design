@@ -68,7 +68,7 @@ The forward representations of a unit are calculated from its minibatch informat
   r_t = \sigma(W_rx_t + U_rh_{t-1} + b_r)
 \end{equation}
 \begin{equation}
-  h_t = (1-z_t) \circ h_t + z_t \circ tanh(W_hx_t + U_h(r_t \circ h_{t-1}) + b_h)
+  h_t = (1-z_t) \circ h_{t-1} + z_t \circ tanh(W_hx_t + U_h(r_t \circ h_{t-1}) + b_h)
 \end{equation}
 \begin{equation}
   h_t = \mathbf{0}

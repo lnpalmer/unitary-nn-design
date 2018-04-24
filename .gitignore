@@ -9,7 +9,3 @@
 **/*.fls
 **/*.blg
 **/*.pdf
-
-# Make products
-obj/
-unnd
