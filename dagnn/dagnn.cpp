@@ -11,6 +11,44 @@ using namespace torch::autograd;
 
 // TODO: optimize, clean
 
+struct Array1D {
+  Array1D(int rows, float fill = 0.0f) {
+    this->rows = rows;
+    this->data = vector<float>(rows, fill);
+  }
+
+  float get(int i) {
+    return data[i];
+  }
+
+  void set(int i, float value) {
+    data[i] = value;
+  }
+
+  int rows;
+  vector<float> data;
+};
+
+struct Array2D {
+  Array2D(int rows, int cols, float fill = 0.0f) {
+    this->rows = rows;
+    this->cols = cols;
+    this->data = vector<float>(rows * cols, fill);
+  }
+
+  float get(int i, int j) {
+    return data[i * cols + j];
+  }
+
+  void set(int i, int j, float value) {
+    data[i * cols + j] = value;
+  }
+
+  int rows;
+  int cols;
+  vector<float> data;
+};
+
 struct FEntry {
 public:
   FEntry(int i = -1) {
@@ -39,19 +77,67 @@ public:
   vector< pair<int, float> > c;
 };
 
-Tensor dtanh_from_tanh(Tensor y) {
+float dtanh_from_tanh(float y) {
   return 1.0f - (y * y);
 }
 
+Array1D var_to_arr1d(Tensor var) {
+  auto arr = Array1D(var.size(0));
+  auto acs = var.accessor<float, 1>();
+
+  for (int i = 0; i < arr.rows; i++) {
+    arr.set(i, acs[i]);
+  }
+
+  return arr;
+}
+
+Array2D var_to_arr2d(Tensor var) {
+  auto arr = Array2D(var.size(0), var.size(1));
+  auto acs = var.accessor<float, 2>();
+
+  for (int i = 0; i < arr.rows; i++) {
+    for (int j = 0; j < arr.cols; j++) {
+      arr.set(i, j, acs[i][j]);
+    }
+  }
+
+  return arr;
+}
+
+Tensor arr1d_to_var(Array1D arr) {
+  auto var = CPU(kFloat).zeros({arr.rows});
+  auto acs = var.accessor<float, 1>();
+
+  for (int i = 0; i < arr.rows; i++) {
+    acs[i] = arr.get(i);
+  }
+
+  return make_variable(var);
+}
+
+Tensor arr2d_to_var(Array2D arr) {
+  auto var = CPU(kFloat).zeros({arr.rows, arr.cols});
+  auto acs = var.accessor<float, 2>();
+
+  for (int i = 0; i < arr.rows; i++) {
+    for (int j = 0; j < arr.cols; j++) {
+      acs[i][j] = arr.get(i, j);
+    }
+  }
+
+  return make_variable(var);
+}
+
 Tensor dagnn_forward(
-  Tensor x,
+  Tensor x_var,
   Tensor W,
-  Tensor b,
+  Tensor b_var,
   Tensor i,
   Tensor o
 ) {
 
-  int M = x.size(0);
+  int M = x_var.size(0);
   int I = *(i.toIntData());
   int O = *(o.toIntData());
   int N = W.size(0);
@@ -61,6 +147,9 @@ Tensor dagnn_forward(
   auto W_v = W._values();
   auto W_i_acs = W_i.accessor<long, 2>();
   auto W_v_acs = W_v.accessor<float, 1>();
+
+  auto b = var_to_arr1d(b_var);
+  auto x_T = var_to_arr2d(x_var.transpose(0, 1));
 
   // parse W for forward connections
   auto F_ = map<int, FEntry>();
@@ -84,44 +173,41 @@ Tensor dagnn_forward(
     F.push((*it).second);
   }
 
-  // load input
-  auto a = cat({
-    x.transpose(0, 1),
-    make_variable(CPU(kFloat).zeros({N - I, M}))
-  });
+  auto z = Array2D(N, M);
+  auto a = Array2D(N, M);
 
-  int d0 = 0;
-  int d1 = 0;
+  // load input
+  for (int i = 0; i < I; i++) {
+    for (int m = 0; m < M; m++) {
+      a.set(i, m, x_T.get(i, m));
+    }
+  }
 
   // actual forward pass
   while (!F.empty()) {
 
-    d0 ++;
-
     FEntry F_i = F.top();
     int i = F_i.i;
-
-    auto z = make_variable(CPU(kFloat).zeros({M}).fill_(b[i]));
 
     for (auto jw_ij : F_i.c) {
 
       int j = jw_ij.first;
       float w_ij = jw_ij.second;
 
-      z += a[j] * w_ij;
-
-      d1 ++;
+      for (int m = 0; m < M; m++) {
+        z.set(i, m, z.get(i, m) + a.get(j, m) * w_ij);
+      }
 
     }
 
-    if (i >= N - O) a[i] = z;
-    else a[i] = z.tanh();
+    if (i >= N - O) for (int m = 0; m < M; m++) a.set(i, m, z.get(i, m));
+    else for (int m = 0; m < M; m++) a.set(i, m, tanhf(z.get(i, m)));
 
     F.pop();
 
   }
 
-  return a.transpose(0, 1);
+  return arr2d_to_var(a).transpose(0, 1).contiguous();
 
 }
 
@@ -130,14 +216,18 @@ vector<at::Tensor> dagnn_backward(
   at::Tensor b,
   at::Tensor i,
   at::Tensor o,
-  at::Tensor a,
-  at::Tensor da
+  at::Tensor a_var,
+  at::Tensor da_var
 ) {
 
-  int M = a.size(0);
+  int M = a_var.size(0);
   int I = *(i.toIntData());
   int O = *(o.toIntData());
   int N = W.size(0);
+
+  auto a_T = var_to_arr2d(a_var.transpose(0, 1));
+  auto da_T = var_to_arr2d(da_var.transpose(0, 1));
+  auto dz_T = var_to_arr2d(da_var.transpose(0, 1));
 
   W = W.coalesce();
   auto W_i = W._indices();
@@ -170,12 +260,6 @@ vector<at::Tensor> dagnn_backward(
   int posW = 0;
 
   // actual backward pass
-  auto dz = da.clone();
-
-  dz = dz.transpose(0, 1);
-  da = da.transpose(0, 1);
-  a = a.transpose(0, 1);
-
   auto dW = W.clone();
   auto dW_i = dW._indices();
   auto dW_v = dW._values();
@@ -186,35 +270,46 @@ vector<at::Tensor> dagnn_backward(
     BEntry B_j = B.top();
     int j = B_j.j;
 
-    auto da_j = da[j].clone();
     for (auto iw_ij : B_j.c) {
 
       int i = iw_ij.first;
       float w_ij = iw_ij.second;
 
-      da_j += dz[i] * w_ij;
+      for (int m = 0; m < M; m++) {
+        da_T.set(j, m, da_T.get(j, m) + dz_T.get(i, m) * w_ij);
+      }
 
       dW_i_acs[0][posW] = i;
       dW_i_acs[1][posW] = j;
-      dW_v[posW] = (dz[i] * a[j]).sum();
+      float dW_v_posW = 0.0f;
+      for (int m = 0; m < M; m++) {
+        dW_v_posW += dz_T.get(i, m) * a_T.get(j, m);
+      }
+      dW_v[posW] = dW_v_posW;
       posW ++;
 
     }
 
-    if (j < I) dz[j] = da_j;
-    else dz[j] = da_j * dtanh_from_tanh(a[j]);
+    if (j < I) for (int m = 0; m < M; m++) dz_T.set(j, m, da_T.get(j, m));
+    else for (int m = 0; m < M; m++) {
+      dz_T.set(j, m, da_T.get(j, m) * dtanh_from_tanh(a_T.get(j, m)));
+    }
 
     B.pop();
 
   }
 
-  dz = dz.transpose(0, 1);
-  auto db = dz.sum(0);
+  auto db = Array1D(N);
+  for (int i = 0; i < N; i++) {
+    for (int m = 0; m < M; m++) {
+      db.set(i, db.get(i) + dz_T.get(i, m));
+    }
+  }
 
   return {
-    dz.slice(1, 0, I),
+    arr2d_to_var(dz_T).slice(0, 0, I).transpose(0, 1).contiguous(),
     dW,
-    db
+    arr1d_to_var(db)
   };
 
 }
