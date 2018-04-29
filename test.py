@@ -10,20 +10,22 @@ from pygraphviz import AGraph
 
 from dagnn import gen_dagnn
 from binary import gen_binary_program
+from adam_quickfix import SparseAdamQuickfixed
 
-N = 32
-I = 8
-O = 8
+N = 128
+I = 16
+O = 16
 M = 1000
-E = 200
+E = 100
 train_size = 50000
 test_size = 10000
 
 primary_network = gen_dagnn(N, I, O)
 primary_network.gen_parameters()
-optimizer = optim.SGD(primary_network.parameters(), lr=1e-1)
+dense_optimizer = optim.Adam(primary_network.dense_parameters(), lr=5e-3)
+sparse_optimizer = SparseAdamQuickfixed(primary_network.sparse_parameters(), lr=5e-3)
 
-bp = gen_binary_program(I, O, random.randint(16, 16))
+bp = gen_binary_program(I, O, random.randint(32, 32))
 
 x_train = torch.randn(train_size, I) > .5
 y_train = bp.run(x_train)
@@ -64,8 +66,6 @@ def draw_net(net, path):
 
     AG.draw(path, prog="neato")
 
-draw_net(primary_network, "before.png")
-
 for e in range(E):
 
     idxs = np.arange(train_size)
@@ -83,7 +83,8 @@ for e in range(E):
         loss = -bit_probs.log().sum() / M
 
         loss.backward()
-        optimizer.step()
+        dense_optimizer.step()
+        sparse_optimizer.step()
 
     one_probs = Fnn.sigmoid(primary_network(x_test))
     bit_probs = y_test * one_probs + (1 - y_test) * (1 - one_probs)
@@ -93,8 +94,6 @@ for e in range(E):
     accuracy = float(correct) / float(test_size)
 
     print("completed epoch %i, test loss: %f, test accuracy: %f" % (e, loss.detach().numpy(), accuracy))
-
-draw_net(primary_network, "after.png")
 
 for step in bp.steps:
     print(step)
