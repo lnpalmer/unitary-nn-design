@@ -154,13 +154,13 @@ def gen_dagnn(N, I, O, n_H = None):
     OH = list(range(N - O, N)) + H
 
     for i in OH:
-        n_f_i = random.randint(1, 8)
+        n_f_i = random.randint(1, 4)
         f_i = random.sample([j for j in IH if j < i], n_f_i)
         for j in f_i:
             nn.connect(j, i, random.gauss(0, 1. / sqrt(n_f_i)))
 
     for j in IH:
-        n_b_j = random.randint(1, 8)
+        n_b_j = random.randint(1, 4)
         b_j = random.sample([i for i in OH if j < i], n_b_j)
         for i in b_j:
             nn.connect(j, i, random.gauss(0, 1. / sqrt(n_b_j)))

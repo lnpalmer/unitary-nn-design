@@ -11,9 +11,9 @@ from pygraphviz import AGraph
 from dagnn import gen_dagnn
 from binary import gen_binary_program
 
-N = 48
-I = 12
-O = 12
+N = 32
+I = 8
+O = 8
 M = 1000
 E = 200
 train_size = 50000
@@ -21,9 +21,9 @@ test_size = 10000
 
 primary_network = gen_dagnn(N, I, O)
 primary_network.gen_parameters()
-optimizer = optim.SGD(primary_network.parameters(), lr=3e-2)
+optimizer = optim.SGD(primary_network.parameters(), lr=1e-1)
 
-bp = gen_binary_program(I, O, random.randint(50, 50))
+bp = gen_binary_program(I, O, random.randint(16, 16))
 
 x_train = torch.randn(train_size, I) > .5
 y_train = bp.run(x_train)
@@ -39,23 +39,30 @@ def draw_net(net, path):
     net.sync_graph()
     AG = AGraph(directed=True, dpi=300)
     AG.graph_attr["outputorder"] = "edgesfirst"
+    AG.graph_attr["bgcolor"] = "#000000"
 
     for node in net._graph.nodes(data=True):
         i, props = node
+        random.seed(i)
         if i < I:
             AG.add_node(i, shape="point", pos=("%f,%f!" % (0 - .4, 4. * i / (I - 1))))
         elif i >= N - O:
             i_ = i - (N - O)
-            AG.add_node(i, shape="point", pos=("%f,%f!" % (4 + .4, 4. * i_ / (O - 1))))
+            AG.add_node(i, shape="point", pos=("%f,%f!" % (6 + .4, 4. * i_ / (O - 1))))
         else:
-            AG.add_node(i, shape="point")
+            i_ = i - I
+            AG.add_node(i,
+                        shape="point",
+                        pos=("%f,%f!" % (6. * i_ / (N - (I + O) + 1), .25 + 3.5 * random.random())),
+                        label="")
 
     for edge in net._graph.edges(data=True):
         j, i, props = edge
         w_ij = props["weight"]
-        AG.add_edge(j, i, penwidth=abs(w_ij) * .8, arrowsize=abs(w_ij) * .2 + .1, len=sqrt(280 / N))
+        color = "#FFAF7F" if w_ij > 0. else "#CF7FCF"
+        AG.add_edge(j, i, penwidth=abs(w_ij) * .3, arrowsize=abs(w_ij) * .05 + .3, color=color)
 
-    AG.draw(path, prog="fdp")
+    AG.draw(path, prog="neato")
 
 draw_net(primary_network, "before.png")
 
