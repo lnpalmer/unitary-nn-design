@@ -1,3 +1,4 @@
+from math import sqrt
 import random
 import torch
 import torch.nn as nn
@@ -20,14 +21,10 @@ class DAGNN(nn.Module):
         self._graph = nx.DiGraph()
 
         for i in range(I):
-            self._populate(i, 0)
+            self.populate(i, 0)
 
         for i in range(N - O, N):
-            self._populate(i, 0)
-
-        for i in range(N - O, N):
-            for j in range(I):
-                self.connect(j, i, random.random() -.5)
+            self.populate(i, 0)
 
         self._needs_gen = True
 
@@ -42,8 +39,7 @@ class DAGNN(nn.Module):
 
         return y
 
-    """ Considered an implementation detail, since it does not guarantee a clean graph """
-    def _populate(self, i, b_i):
+    def populate(self, i, b_i):
         self._graph.add_node(i, b=b_i)
         self._needs_gen=True
 
@@ -53,14 +49,20 @@ class DAGNN(nn.Module):
 
     def addunit(self, j, i, b_k, w_ik, w_kj):
         N, I, O = self.N, self.I, self.O
-        while True:
-            k = random.randint(max(I, j + 1), min(N - O, i))
-            if not self._graph.has_node(k):
-                self._populate(k, b_k)
-                self.connect(j, k, w_kj)
-                self.connect(k, i, w_ik)
-                self._needs_gen = True
-                return
+
+        k_candidates = range(max(I, j + 1), min(N - 1, i))
+        k_candidates = [k for k in k_candidates if not self._graph.has_node(k)]
+
+        if len(k_candidates) > 0:
+            k = random.choice(k_candidates)
+            self._populate(k, b_k)
+            self.connect(j, k, w_kj)
+            self.connect(k, i, w_ik)
+            self._needs_gen = True
+            return k
+
+        else:
+            return -1
 
     def gen_parameters(self):
         N = self.N
@@ -91,6 +93,25 @@ class DAGNN(nn.Module):
         self.W = nn.Parameter(torch.sparse_coo_tensor(W_i, W_v, (N, N)))
         self._needs_gen = False
 
+    def sync_graph(self):
+        if self._needs_gen:
+            self._gen_parameters()
+
+        W_i_T = self.W._indices().transpose(0, 1).detach().numpy()
+        W_v = self.W._values().detach().numpy()
+        W_map = {}
+        for pos_W in range(W_v.shape[0]):
+            i, j = W_i_T[pos_W]
+            w_ij = W_v[pos_W]
+            W_map[(i, j)] = w_ij
+
+        for edge in self._graph.edges():
+            j, i = edge
+            self._graph.add_edge(j, i, weight=W_map[(i, j)])
+
+    def units(self):
+        return self._graph.nodes()
+
     def dense_parameters(self):
         dp = []
         for param in self.parameters():
@@ -118,3 +139,30 @@ class DAGNNFunction(Function):
         W, b, i, o, a = ctx.saved_variables
         dx, dW, db = dagnn_cpp.backward(W, b, i, o, a, da)
         return dx, dW, db, torch.zeros(1), torch.zeros(1)
+
+def gen_dagnn(N, I, O, n_H = None):
+    if n_H is None:
+        n_H = N - (I + O)
+    nn = DAGNN(N, I, O)
+    H = random.sample(range(I, N - O), n_H)
+
+    for i in H:
+        nn.populate(i, random.gauss(0, 1))
+    units = nn.units()
+
+    IH = list(range(0, I)) + H
+    OH = list(range(N - O, N)) + H
+
+    for i in OH:
+        n_f_i = random.randint(1, 8)
+        f_i = random.sample([j for j in IH if j < i], n_f_i)
+        for j in f_i:
+            nn.connect(j, i, random.gauss(0, 1. / sqrt(n_f_i)))
+
+    for j in IH:
+        n_b_j = random.randint(1, 8)
+        b_j = random.sample([i for i in OH if j < i], n_b_j)
+        for i in b_j:
+            nn.connect(j, i, random.gauss(0, 1. / sqrt(n_b_j)))
+
+    return nn
