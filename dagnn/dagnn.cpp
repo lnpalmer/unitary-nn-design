@@ -129,7 +129,7 @@ Tensor arr2d_to_var(Array2D arr) {
   return make_variable(var);
 }
 
-Tensor dagnn_forward(
+vector<Tensor> dagnn_forward(
   Tensor x_var,
   Tensor W,
   Tensor b_var,
@@ -179,6 +179,7 @@ Tensor dagnn_forward(
   // load input
   for (int i = 0; i < I; i++) {
     for (int m = 0; m < M; m++) {
+      z.set(i, m, x_T.get(i, m));
       a.set(i, m, x_T.get(i, m));
     }
   }
@@ -207,7 +208,10 @@ Tensor dagnn_forward(
 
   }
 
-  return arr2d_to_var(a).transpose(0, 1).contiguous();
+  return {
+    arr2d_to_var(a).transpose(0, 1).contiguous(),
+    arr2d_to_var(z).transpose(0, 1).contiguous()
+  };
 
 }
 
@@ -217,13 +221,18 @@ vector<at::Tensor> dagnn_backward(
   at::Tensor i,
   at::Tensor o,
   at::Tensor a_var,
-  at::Tensor da_var
+  at::Tensor dy
 ) {
 
   int M = a_var.size(0);
   int I = *(i.toIntData());
   int O = *(o.toIntData());
   int N = W.size(0);
+
+  auto da_var = cat({
+    make_variable(CPU(kFloat).zeros({M, N - O})),
+    dy
+  }, 1);
 
   auto a_T = var_to_arr2d(a_var.transpose(0, 1));
   auto da_T = var_to_arr2d(da_var.transpose(0, 1));
@@ -307,7 +316,7 @@ vector<at::Tensor> dagnn_backward(
   }
 
   return {
-    arr2d_to_var(dz_T).slice(0, 0, I).transpose(0, 1).contiguous(),
+    arr2d_to_var(dz_T).transpose(0, 1).contiguous(),
     dW,
     arr1d_to_var(db)
   };

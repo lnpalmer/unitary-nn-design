@@ -42,8 +42,7 @@ class DAGNN(nn.Module):
 
         N, W, b, O, I_, O_ = self.N, self.W, self.b, self.O, self.I_, self.O_
 
-        a = DAGNNFunction.apply(x, W, b, I_, O_)
-        y = a[:, N - O:N]
+        y, _ = DAGNNFunction.apply(x, W, b, I_, O_)
 
         return y
 
@@ -181,12 +180,27 @@ class DAGNNFunction(Function):
 
     @staticmethod
     def forward(ctx, x, W, b, i, o):
-        a = dagnn_cpp.forward(x, W, b, i, o)
-        ctx.save_for_backward(W, b, i, o, a)
-        return a
+        a, z = dagnn_cpp.forward(x, W, b, i, o)
+        x_s = torch.LongTensor([x.size()[1]])
+        ctx.save_for_backward(W, b, i, o, a, x_s)
+
+        N = W.size()[0]
+        I = i.detach().numpy()[0]
+        O = o.detach().numpy()[0]
+        X_s = x_s.detach().numpy()[0]
+
+        if X_s > I:
+            x.data[:, I:X_s] = z.data[:, I:X_s]
+
+        y = a[:, N - O:N]
+        return y, z
 
     @staticmethod
-    def backward(ctx, da):
-        W, b, i, o, a = ctx.saved_variables
-        dx, dW, db = dagnn_cpp.backward(W, b, i, o, a, da)
+    def backward(ctx, dy, dz):
+        W, b, i, o, a, x_s = ctx.saved_variables
+        dz, dW, db = dagnn_cpp.backward(W, b, i, o, a, dy)
+
+        N = W.size()[0]
+        X_s = x_s.detach().numpy()[0]
+        dx = dz[:, :X_s]
         return dx, dW, db, torch.zeros(1), torch.zeros(1)

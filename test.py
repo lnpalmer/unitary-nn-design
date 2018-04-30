@@ -69,42 +69,7 @@ def draw_net(net, path):
 
 env = gym.make('unitary-design-v0')
 env.reset()
-for i in range(30):
+for _ in range(30):
     ob, reward, done, _ = env.step(("NOOP",))
-    print(ob.size(), reward)
 
 draw_net(env.primary_network, "net.png")
-
-exit()
-
-for e in range(E):
-
-    idxs = np.arange(train_size)
-    np.random.shuffle(idxs)
-
-    for start in range(0, train_size, M):
-        primary_network.zero_grad()
-
-        idxs_mb = idxs[start:start + M]
-        x_mb = x_train[idxs_mb]
-        y_mb = y_train[idxs_mb]
-
-        one_probs = Fnn.sigmoid(primary_network(x_mb))
-        bit_probs = y_mb * one_probs + (1 - y_mb) * (1 - one_probs)
-        loss = -bit_probs.log().sum() / M
-
-        loss.backward()
-        dense_optimizer.step()
-        sparse_optimizer.step()
-
-    one_probs = Fnn.sigmoid(primary_network(x_test))
-    bit_probs = y_test * one_probs + (1 - y_test) * (1 - one_probs)
-    loss = -bit_probs.log().sum() / test_size
-
-    correct = ((bit_probs > .5).sum(1) == O).sum().detach().numpy()
-    accuracy = float(correct) / float(test_size)
-
-    print("completed epoch %i, test loss: %f, test accuracy: %f" % (e, loss.detach().numpy(), accuracy))
-
-for step in bp.steps:
-    print(step)

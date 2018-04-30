@@ -19,7 +19,7 @@ lr=3e-5
 M = 100
 N_mb = 100
 delta_warmup = 1e-2
-S_example = 20 # TODO: rename
+S_example = 10 # TODO: rename
 
 class DesignEnv(gym.Env):
 
@@ -56,17 +56,26 @@ class DesignEnv(gym.Env):
         # train for N_mb minibatches
         test_loss = self._train()
 
-        # make observation of activations, gradients
+        # make observation of preactivations and their gradients for a small batch
         self.primary_network.zero_grad()
         idxs = np.arange(train_size)
         np.random.shuffle(idxs)
         idxs_ob = idxs[:S_example]
         x_ob = self.x_train[idxs_ob]
+        z_ob = torch.cat([x_ob, torch.zeros(S_example, self.N - self.I)], 1)
+        z_ob.requires_grad_(True)
         y_ob = self.y_train[idxs_ob]
-        a = self.primary_network(x_ob)
 
-        # TODO: get z, dz
-        ob = torch.zeros(1, 1)
+        loss = self._loss(z_ob, y_ob)
+        loss.backward()
+
+        z = z_ob.data.transpose(0, 1).contiguous()
+        dz = z_ob.grad.data.transpose(0, 1).contiguous()
+
+        ob = self.primary_network._graph.copy()
+        for i in ob.nodes():
+            ob.add_node(i, z=z[i], dz=dz[i])
+
         done = False
         reward = self._get_reward(test_loss)
 
@@ -84,11 +93,11 @@ class DesignEnv(gym.Env):
         # generate binary program and dataset
         self.bp = gen_binary_program(I, O, random.randint(*bp_step_range))
 
-        x_train = torch.randn(train_size, I) > .5
+        x_train = torch.randn(train_size, I) > 0.
         y_train = self.bp.run(x_train)
         x_train, y_train = x_train.float(), y_train.float()
 
-        x_test = torch.randn(test_size, I) > .5
+        x_test = torch.randn(test_size, I) > 0.
         y_test = self.bp.run(x_test)
         x_test, y_test = x_test.float(), y_test.float()
 
@@ -142,7 +151,7 @@ register(
     id="unitary-design-v0",
     entry_point="design_env:DesignEnv",
     kwargs={
-        "N": 94,
-        "I": 12,
-        "O": 12,
-        "H": 48})
+        "N": 20,
+        "I": 8,
+        "O": 8,
+        "H": 4})
