@@ -7,10 +7,12 @@ import torch.nn.functional as Fnn
 import torch.optim as optim
 import networkx as nx
 from pygraphviz import AGraph
+import gym
 
 from dagnn import gen_dagnn
 from binary import gen_binary_program
 from adam_quickfix import SparseAdamQuickfixed
+import design_env
 
 N = 128
 I = 16
@@ -21,7 +23,6 @@ train_size = 50000
 test_size = 10000
 
 primary_network = gen_dagnn(N, I, O)
-primary_network.gen_parameters()
 dense_optimizer = optim.Adam(primary_network.dense_parameters(), lr=5e-3)
 sparse_optimizer = SparseAdamQuickfixed(primary_network.sparse_parameters(), lr=5e-3)
 
@@ -65,6 +66,16 @@ def draw_net(net, path):
         AG.add_edge(j, i, penwidth=abs(w_ij) * .3, arrowsize=abs(w_ij) * .05 + .3, color=color)
 
     AG.draw(path, prog="neato")
+
+env = gym.make('unitary-design-v0')
+env.reset()
+for i in range(30):
+    ob, reward, done, _ = env.step(("NOOP",))
+    print(ob.size(), reward)
+
+draw_net(env.primary_network, "net.png")
+
+exit()
 
 for e in range(E):
 

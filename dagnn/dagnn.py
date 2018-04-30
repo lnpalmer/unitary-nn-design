@@ -26,11 +26,19 @@ class DAGNN(nn.Module):
         for i in range(N - O, N):
             self.populate(i, 0)
 
+        # bare minimum W, updated immediately
+        self.W = nn.Parameter(
+            torch.sparse.FloatTensor(
+                torch.zeros(2, 1).long(),
+                torch.ones(1),
+                torch.Size([N, N])))
+        self.b = nn.Parameter(torch.zeros(N))
+
         self._needs_gen = True
 
     def forward(self, x):
         if self._needs_gen:
-            self._gen_parameters()
+            self.gen_parameters()
 
         N, W, b, O, I_, O_ = self.N, self.W, self.b, self.O, self.I_, self.O_
 
@@ -45,6 +53,10 @@ class DAGNN(nn.Module):
 
     def connect(self, j, i, w_ij):
         self._graph.add_edge(j, i, weight=w_ij)
+        self._needs_gen=True
+
+    def disconnect(self, j, i):
+        self._graph.remove_edge(j, i)
         self._needs_gen=True
 
     def addunit(self, j, i, b_k, w_ik, w_kj):
@@ -64,19 +76,27 @@ class DAGNN(nn.Module):
         else:
             return -1
 
+    def delunit(self, i):
+        edges = list(self._graph.in_edges([i])) + list(self._graph.out_edges([i]))
+        for edge in edges:
+            self.disconnect(*edge)
+        self._graph.remove_node(i)
+
     def gen_parameters(self):
         N = self.N
 
         nodes = self._graph.nodes(data=True)
         edges = self._graph.edges(data=True)
 
-        b = torch.zeros(N)
+        b_new = torch.zeros(N)
         for node in nodes:
             i, b_i = node
             b_i = b_i["b"]
 
-            b[i] = b_i
-        self.b = nn.Parameter(b)
+            b_new[i] = b_i
+
+        # HACK to avoid creating a new parameter, which disrupts optimizers
+        self.b.data.zero_().add_(b_new)
 
         W_i = torch.zeros(2, len(edges)).long()
         W_v = torch.zeros(len(edges))
@@ -90,12 +110,16 @@ class DAGNN(nn.Module):
             W_v[w_pos] = w_ij
 
             w_pos += 1
-        self.W = nn.Parameter(torch.sparse_coo_tensor(W_i, W_v, (N, N)))
+
+        # HACK to avoid creating a new parameter, which disrupts optimizers
+        W_new = torch.sparse_coo_tensor(W_i, W_v, (N, N))
+        self.W.data.zero_().add_(W_new)
+
         self._needs_gen = False
 
     def sync_graph(self):
         if self._needs_gen:
-            self._gen_parameters()
+            self.gen_parameters()
 
         W_i_T = self.W._indices().transpose(0, 1).detach().numpy()
         W_v = self.W._values().detach().numpy()
@@ -126,20 +150,6 @@ class DAGNN(nn.Module):
                 sp.append(param)
         return sp
 
-class DAGNNFunction(Function):
-
-    @staticmethod
-    def forward(ctx, x, W, b, i, o):
-        a = dagnn_cpp.forward(x, W, b, i, o)
-        ctx.save_for_backward(W, b, i, o, a)
-        return a
-
-    @staticmethod
-    def backward(ctx, da):
-        W, b, i, o, a = ctx.saved_variables
-        dx, dW, db = dagnn_cpp.backward(W, b, i, o, a, da)
-        return dx, dW, db, torch.zeros(1), torch.zeros(1)
-
 def gen_dagnn(N, I, O, n_H = None):
     if n_H is None:
         n_H = N - (I + O)
@@ -166,3 +176,17 @@ def gen_dagnn(N, I, O, n_H = None):
             nn.connect(j, i, random.gauss(0, 1. / sqrt(n_b_j)))
 
     return nn
+
+class DAGNNFunction(Function):
+
+    @staticmethod
+    def forward(ctx, x, W, b, i, o):
+        a = dagnn_cpp.forward(x, W, b, i, o)
+        ctx.save_for_backward(W, b, i, o, a)
+        return a
+
+    @staticmethod
+    def backward(ctx, da):
+        W, b, i, o, a = ctx.saved_variables
+        dx, dW, db = dagnn_cpp.backward(W, b, i, o, a, da)
+        return dx, dW, db, torch.zeros(1), torch.zeros(1)
