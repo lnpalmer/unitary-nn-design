@@ -15,7 +15,7 @@ from adam_quickfix import SparseAdamQuickfixed
 train_size = 50000
 test_size = 10000
 bp_step_range = 16, 16
-lr=3e-5
+lr=1e-3
 M = 100
 N_mb = 100
 delta_warmup = 1e-2
@@ -74,7 +74,7 @@ class DesignEnv(gym.Env):
 
         ob = self.primary_network._graph.copy()
         for i in ob.nodes():
-            ob.add_node(i, z=z[i], dz=dz[i])
+            ob.add_node(i, z=z[i].unsqueeze(0), dz=dz[i].unsqueeze(0))
 
         done = False
         reward = self._get_reward(test_loss)
@@ -110,6 +110,28 @@ class DesignEnv(gym.Env):
         while abs(delta_loss) > delta_warmup:
             test_loss = self._train()
             delta_loss = -self._get_reward(test_loss)
+
+        # make observation of preactivations and their gradients for a small batch
+        self.primary_network.zero_grad()
+        idxs = np.arange(train_size)
+        np.random.shuffle(idxs)
+        idxs_ob = idxs[:S_example]
+        x_ob = self.x_train[idxs_ob]
+        z_ob = torch.cat([x_ob, torch.zeros(S_example, self.N - self.I)], 1)
+        z_ob.requires_grad_(True)
+        y_ob = self.y_train[idxs_ob]
+
+        loss = self._loss(z_ob, y_ob)
+        loss.backward()
+
+        z = z_ob.data.transpose(0, 1).contiguous()
+        dz = z_ob.grad.data.transpose(0, 1).contiguous()
+
+        ob = self.primary_network._graph.copy()
+        for i in ob.nodes():
+            ob.add_node(i, z=z[i].unsqueeze(0), dz=dz[i].unsqueeze(0))
+
+        return ob
 
     def _train(self):
         idxs = np.arange(train_size)
@@ -151,7 +173,7 @@ register(
     id="unitary-design-v0",
     entry_point="design_env:DesignEnv",
     kwargs={
-        "N": 20,
+        "N": 48,
         "I": 8,
         "O": 8,
-        "H": 4})
+        "H": 16})

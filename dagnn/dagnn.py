@@ -51,12 +51,23 @@ class DAGNN(nn.Module):
         self._needs_gen=True
 
     def connect(self, j, i, w_ij):
-        self._graph.add_edge(j, i, weight=w_ij)
-        self._needs_gen=True
+        N, I, O = self.N, self.I, self.O
+
+        if self._graph.has_edge(j ,i) or i <= j or i < I and j < I or i >= N - O and j >= N - O:
+            return False
+        else:
+            self._graph.add_edge(j, i, weight=w_ij)
+            self._needs_gen = True
+            return True
 
     def disconnect(self, j, i):
-        self._graph.remove_edge(j, i)
-        self._needs_gen=True
+        if self._graph.has_edge(j, i):
+            self._graph.remove_edge(j, i)
+            self._needs_gen = True
+            self.autoremove()
+            return True
+        else:
+            return False
 
     def addunit(self, j, i, b_k, w_ik, w_kj):
         N, I, O = self.N, self.I, self.O
@@ -66,20 +77,23 @@ class DAGNN(nn.Module):
 
         if len(k_candidates) > 0:
             k = random.choice(k_candidates)
-            self._populate(k, b_k)
+            self.populate(k, b_k)
             self.connect(j, k, w_kj)
             self.connect(k, i, w_ik)
             self._needs_gen = True
-            return k
-
+            return True
         else:
-            return -1
+            return False
 
     def delunit(self, i):
-        edges = list(self._graph.in_edges([i])) + list(self._graph.out_edges([i]))
-        for edge in edges:
-            self.disconnect(*edge)
-        self._graph.remove_node(i)
+        N, I, O = self.N, self.I, self.O
+
+        if i < I or i >= N - O:
+            return False
+        else:
+            self._graph.remove_node(i)
+            self.autoremove()
+            return True
 
     def gen_parameters(self):
         N = self.N
@@ -126,7 +140,7 @@ class DAGNN(nn.Module):
         for pos_W in range(W_v.shape[0]):
             i, j = W_i_T[pos_W]
             w_ij = W_v[pos_W]
-            W_map[(i, j)] = w_ij
+            W_map[(i, j)] = float(w_ij)
 
         for edge in self._graph.edges():
             j, i = edge
@@ -134,6 +148,21 @@ class DAGNN(nn.Module):
 
     def units(self):
         return self._graph.nodes()
+
+    def autoremove(self):
+        N, I, O = self.N, self.I, self.O
+
+        clean = False
+        while not clean:
+            clean = True
+            for i in self._graph.nodes():
+                if i >= I and i < N - O:
+                    F_i = self._graph.in_edges([i])
+                    B_i = self._graph.out_edges([i])
+                    if len(F_i) == 0 or len(B_i) == 0:
+                        self.delunit(i)
+                        clean = False
+                        break
 
     def dense_parameters(self):
         dp = []

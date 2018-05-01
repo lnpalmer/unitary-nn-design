@@ -77,13 +77,13 @@ The forward representations of a unit are calculated from its minibatch informat
   GRU(x_1, \ldots, x_n) = (h_1, \ldots, h_n)
 \end{equation}
 
-\(FC(\cdot)\) denotes a fully connected network. \(\ora{\rho}_i\) and \(\ola{\rho}_i\) are the forward and backward representations of unit \(i\), with RNN parameters \ora{\theta} and \ola{\theta}:
+In the edge case of an empty sequence, \(GRU(\cdot)\) returns the zero vector. \(FC(\cdot)\) denotes a fully connected network. \(\ora{\rho}_i\) and \(\ola{\rho}_i\) are the forward and backward representations of unit \(i\), with RNN parameters \ora{\theta} and \ola{\theta}:
 
 \begin{equation}
   \ora{\phi}_i = GRU_{forward}(\ora{\rho}_{F_{i,1}}, \ldots, \ora{\rho}_{F_{i,|F_i|}})_{|F_i|}
 \end{equation}
 \begin{equation}
-  \ora{\rho}_i = FC_{forward}(cat(\ora{\phi}, \alpha_i, \delta_i))
+  \ora{\rho}_i = FC_{forward}(cat(\ora{\phi}_i, \alpha_i, \delta_i))
 \end{equation}
 \begin{equation}
   \ola{\phi}_i = GRU_{backward}(\ola{\rho}_{B_{i,1}}, \ldots, \ola{\rho}_{B_{i,|B_i|}})_{|B_i|}
@@ -92,16 +92,16 @@ The forward representations of a unit are calculated from its minibatch informat
   \ola{\rho}_i = FC_{backward}(cat(\ola{\phi}_i, \alpha_i, \delta_i))
 \end{equation}
 
-For each unit \(i\), the forward and backward representations are used to calculate the logits \(\lambda_i\) of the probabilities to use the unit for several roles:
+For each unit \(i\), the forward and backward representations are used to calculate the logits \(\psi_i\) of the probabilities to use the unit for several roles:
 
 \begin{equation}
-  \lambda_i = FC_{unit}(cat(\ora{\rho}_i, \ola{\rho}_i))
+  \psi_i = FC_{unit}(cat(\ora{\rho}_i, \ola{\rho}_i))
 \end{equation}
 
 \begin{center}
   \begin{tabular}{| l | l |}
     \hline
-    \(j\) & \(softmax(\lambda_{:,j})_i\) \\
+    \(j\) & \(softmax(\psi_{:,j})_i\) \\
     \hline
     1 & \(P(CON(i, \cdot) | CON)\) \\
     2 & \(P(CON(\cdot, i) | CON)\) \\
@@ -114,7 +114,7 @@ For each unit \(i\), the forward and backward representations are used to calcul
   \end{tabular}
 \end{center}
 
-The first \(I\) backward representations and last \(O\) forward representations are then used to calculate the logits \(\beta\) of choosing actions \(CON\), \(DISCON\), \(ADDUNIT\), \(DELUNIT\), and \(NOOP\):
+The first \(I\) backward representations and last \(O\) forward representations are then used to calculate the logits \(\omega\) of choosing actions \(CON\), \(DISCON\), \(ADDUNIT\), \(DELUNIT\), and \(NOOP\):
 
 \begin{equation}
   \ora{\alpha} = GRU_{forward}(\ora{\rho}_{N}, \ldots, \ora{\rho}_{N-O+1})_O
@@ -123,7 +123,7 @@ The first \(I\) backward representations and last \(O\) forward representations 
   \ola{\alpha} = GRU_{backward}(\ola{\rho}_1, \ldots, \ola{\rho}_I)_I
 \end{equation}
 \begin{equation}
-  \beta = FC_{actor}(cat(\ora{\alpha}, \ola{\alpha}))
+  \omega = FC_{actor}(cat(\ora{\alpha}, \ola{\alpha}))
 \end{equation}
 
 The final representations are also used to calculate \(V\), the value estimate of the current state:
@@ -138,16 +138,16 @@ Inbound and outbound probabilities for actions involving multiple units are assu
   P(CON) = softmax(\beta)_1
 \end{equation}
 \begin{equation}
-  P(CON(i, \cdot) | CON) = softmax(\lambda_{:, 1})_i
+  P(CON(i, \cdot) | CON) = softmax(\psi_{:, 1})_i
 \end{equation}
 \begin{equation}
-  P(CON(\cdot, j) | CON) = softmax(\lambda_{:, 2})_j
+  P(CON(\cdot, j) | CON) = softmax(\psi_{:, 2})_j
 \end{equation}
 \begin{equation}
   P(CON(i, j)) = P(CON(i, \cdot) | CON) \cdot P(P(CON(\cdot, j)) | CON) \cdot P(CON)
 \end{equation}
 
-Softmax for \(\lambda\) only includes units that are used in the actual computation graph from the first \(I\) to last \(O\) units. Together, overall action probabilities and unit role probabilities define the action selection policy \(\pi\) for the designer agent.
+Softmax for \(\psi\) only includes units that are used in the actual computation graph from the first \(I\) to last \(O\) units. Together, overall action probabilities and unit role probabilities define the action selection policy \(\pi\) for the designer agent.
 
 \section{Experiments} \label{experiments}
 
