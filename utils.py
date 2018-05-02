@@ -31,3 +31,6 @@ def draw_net(net, path):
         AG.add_edge(j, i, penwidth=abs(w_ij) * .3, arrowsize=abs(w_ij) * .05 + .3, color=color)
 
     AG.draw(path, prog="neato")
+
+def gae(self):
+    raise NotImplementedError

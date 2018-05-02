@@ -17,7 +17,7 @@ test_size = 10000
 bp_step_range = 16, 16
 lr=1e-3
 M = 100
-N_mb = 100
+N_mb = 20
 delta_warmup = 1e-2
 S_example = 10 # TODO: rename
 
