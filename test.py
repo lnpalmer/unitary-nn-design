@@ -20,7 +20,7 @@ import design_env
 N = 48
 I = 8
 O = 8
-lr = 3e-4
+lr = 1e-3
 T = 128
 W = 4
 D = 1

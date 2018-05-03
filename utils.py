@@ -43,7 +43,7 @@ def gae(rewards, dones, values, gamma=0.99, lambda_=0.95):
     advantages = [None] * T
 
     return_ = values[T]
-    advantage = torch.zeros(1)
+    advantage = torch.zeros(1, 1)
 
     for t in reversed(range(T)):
         return_ = rewards[t] + return_ * gamma
@@ -52,8 +52,8 @@ def gae(rewards, dones, values, gamma=0.99, lambda_=0.95):
         advantage = delta + advantage * gamma * lambda_
 
         if dones[t]:
-            return_ = torch.zeros(1)
-            advantage = torch.zeros(1)
+            return_ = torch.zeros(1, 1)
+            advantage = torch.zeros(1, 1)
 
         returns[t] = return_
         advantages[t] = advantage
