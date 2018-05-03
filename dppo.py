@@ -125,7 +125,7 @@ def dppo_worker(**kwargs):
         model_old.load_state_dict(model.state_dict())
 
         if rank == 0:
-            print(sum(rewards) / float(T_worker))
+            print(f"@{(step_counter.get() // M) * T} average reward: {sum(rewards) / float(T_worker)}")
 
         while True:
             step = step_counter.get()

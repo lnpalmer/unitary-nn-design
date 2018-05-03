@@ -1,31 +1,24 @@
-import random
-from math import sqrt
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as Fnn
 import torch.optim as optim
-import networkx as nx
-from pygraphviz import AGraph
 import gym
 import time
+import os.path
 
-from dagnn import gen_dagnn
-from binary import gen_binary_program
-from adam_quickfix import SparseAdamQuickfixed
 from designer import DesignerNetwork
 from dppo import DPPO
 import design_env
 
-N = 128
-I = 16
-O = 16
-lr = 3e-3
-T = 128
+N = design_env.N
+I = design_env.I
+O = design_env.O
+
+lr = 1e-3
 W = 4
+T = W * 32
 D = 1
 M = 3
-timesteps = 8192
+timesteps = 1000000
+model_path = "designer_params"
 
 model = DesignerNetwork(N, I, O)
 optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -35,7 +28,12 @@ def clone_model(model):
     clone.load_state_dict(model.state_dict())
     return clone
 
+if os.path.exists(model_path):
+    model.load_state_dict(torch.load(model_path))
+
 rl = DPPO(
     env_name="unitary-design-v0", model=model, clone_model=clone_model,
     optimizer=optimizer, T=T, W=W, D=D, M=M)
 rl.run(timesteps)
+
+torch.save(model.state_dict(), model_path)

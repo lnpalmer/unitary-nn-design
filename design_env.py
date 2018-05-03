@@ -12,10 +12,15 @@ from adam_quickfix import SparseAdamQuickfixed
 
 # TODO cleanup name ambiguity: ACTION(i, j) vs. j, i from matrix standard
 
+N = 128
+I = 16
+O = 16
+H = 16
+
 train_size = 50000
 test_size = 10000
 bp_step_range = 32, 32
-lr=1e-3
+lr=3e-3
 M = 100
 N_mb = 10
 N_step = 1000
@@ -178,7 +183,7 @@ register(
     id="unitary-design-v0",
     entry_point="design_env:DesignEnv",
     kwargs={
-        "N": 128,
-        "I": 16,
-        "O": 16,
-        "H": 16})
+        "N": N,
+        "I": I,
+        "O": O,
+        "H": H})
