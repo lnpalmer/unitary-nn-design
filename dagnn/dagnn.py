@@ -72,7 +72,7 @@ class DAGNN(nn.Module):
     def addunit(self, j, i, b_k, w_ik, w_kj):
         N, I, O = self.N, self.I, self.O
 
-        k_candidates = range(max(I, j + 1), min(N - 1, i))
+        k_candidates = range(max(I, j + 1), min(N - O, i))
         k_candidates = [k for k in k_candidates if not self._graph.has_node(k)]
 
         if len(k_candidates) > 0:

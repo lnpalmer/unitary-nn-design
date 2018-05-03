@@ -17,10 +17,10 @@ from designer import DesignerNetwork
 from dppo import DPPO
 import design_env
 
-N = 48
-I = 8
-O = 8
-lr = 1e-3
+N = 128
+I = 16
+O = 16
+lr = 3e-3
 T = 128
 W = 4
 D = 1

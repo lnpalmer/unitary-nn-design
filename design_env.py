@@ -14,7 +14,7 @@ from adam_quickfix import SparseAdamQuickfixed
 
 train_size = 50000
 test_size = 10000
-bp_step_range = 16, 16
+bp_step_range = 32, 32
 lr=1e-3
 M = 100
 N_mb = 10
@@ -178,7 +178,7 @@ register(
     id="unitary-design-v0",
     entry_point="design_env:DesignEnv",
     kwargs={
-        "N": 48,
-        "I": 8,
-        "O": 8,
+        "N": 128,
+        "I": 16,
+        "O": 16,
         "H": 16})
