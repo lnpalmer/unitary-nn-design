@@ -17,7 +17,8 @@ test_size = 10000
 bp_step_range = 16, 16
 lr=1e-3
 M = 100
-N_mb = 20
+N_mb = 10
+N_step = 1000
 delta_warmup = 1e-2
 S_example = 10 # TODO: rename
 
@@ -30,6 +31,8 @@ class DesignEnv(gym.Env):
         self.H = H
 
     def step(self, action):
+        self.age += 1
+
         # apply the modification action to the network
         instr = action[0]
         if instr in ["CON", "DISCON", "ADDUNIT"]:
@@ -76,12 +79,14 @@ class DesignEnv(gym.Env):
         for i in ob.nodes():
             ob.add_node(i, z=z[i].unsqueeze(0), dz=dz[i].unsqueeze(0))
 
-        done = False
         reward = self._get_reward(test_loss)
+        done = abs(reward > 1e2) or self.age == N_step
 
         return ob, reward, done, None
 
     def reset(self):
+        self.age = 0
+
         N, I, O, H = self.N, self.I, self.O, self.H
 
         # generate primary network

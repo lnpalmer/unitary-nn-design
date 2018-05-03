@@ -90,7 +90,7 @@ class DesignerNetwork(nn.Module):
         # global results
         input = torch.cat([alpha_forward, alpha_backward], 1)
         omega = self.fc_actor(input)
-        v = self.fc_critic(input)
+        value = self.fc_critic(input)
 
         # unit results
         psi = [None] * N
@@ -101,25 +101,25 @@ class DesignerNetwork(nn.Module):
             else:
                 psi[i] = torch.ones(M, N_unit_roles) * -60.
 
-        instr_probs = Fnn.softmax(omega, dim=1)
-        role_probs = Fnn.softmax(torch.stack(psi, 1), dim=1)
+        instr_prob = Fnn.softmax(omega, dim=1)
+        role_prob = Fnn.softmax(torch.stack(psi, 1), dim=1)
 
-        return (instr_probs, role_probs), v
+        return (instr_prob, role_prob), value
 
     """ Choose an action ϵ-greedily from instruction and unit role probabilities """
-    def choose_action(self, action_probs, epsilon=0.):
-        instr_probs, role_probs = action_probs
-        instr_probs, role_probs = instr_probs.squeeze(0), role_probs.squeeze(0)
+    def choose_action(self, action_prob, epsilon=0.):
+        instr_prob, role_prob = action_prob
+        instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
 
-        _, instr = torch.max(instr_probs, 0)
+        _, instr = torch.max(instr_prob, 0)
         instr = instr.detach().numpy()
         instr = instrs[instr]
 
-        _, roles = torch.max(role_probs, 0)
+        _, roles = torch.max(role_prob, 0)
         roles = roles.detach().numpy()
 
         if random.random() < epsilon:
-            temp = role_probs[:, 0].detach().numpy()
+            temp = role_prob[:, 0].detach().numpy()
             units = [i for i in range(self.N) if temp[i] > 1e-20]
 
             instr = random.choice(instrs)
@@ -154,9 +154,9 @@ class DesignerNetwork(nn.Module):
         return action
 
     """ The probability of taking an action given probabilities """
-    def prob_action(self, probs, action):
-        instr_probs, role_probs = probs
-        instr_probs, role_probs = instr_probs.squeeze(0), role_probs.squeeze(0)
+    def prob_action(self, prob, action):
+        instr_prob, role_prob = prob
+        instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
 
         instr = action[0]
 
@@ -164,17 +164,17 @@ class DesignerNetwork(nn.Module):
             _, j, i = action
 
             if instr == "CON":
-                return instr_probs[0] * role_probs[j, 0] * role_probs[i, 1]
+                return instr_prob[0] * role_prob[j, 0] * role_prob[i, 1]
 
             if instr == "DISCON":
-                return instr_probs[1] * role_probs[j, 2] * role_probs[i, 3]
+                return instr_prob[1] * role_prob[j, 2] * role_prob[i, 3]
 
             if instr == "ADDUNIT":
-                return instr_probs[2] * role_probs[j, 4] * role_probs[i, 5]
+                return instr_prob[2] * role_prob[j, 4] * role_prob[i, 5]
 
         if instr == "DELUNIT":
             _, i = action
-            return instr_probs[3] * role_probs[i, 6]
+            return instr_prob[3] * role_prob[i, 6]
 
         if instr == "NOOP":
-            return instr_probs[4]
+            return instr_prob[4]

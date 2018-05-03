@@ -1,4 +1,6 @@
 import random
+import torch
+import torch.multiprocessing as mp
 from pygraphviz import AGraph
 
 def draw_net(net, path):
@@ -32,5 +34,72 @@ def draw_net(net, path):
 
     AG.draw(path, prog="neato")
 
-def gae(self):
-    raise NotImplementedError
+def gae(rewards, dones, values, gamma=0.99, lambda_=0.95):
+    T = len(rewards)
+
+    values = [value.detach().data for value in values]
+
+    returns = [None] * T
+    advantages = [None] * T
+
+    return_ = values[T]
+    advantage = torch.zeros(1)
+
+    for t in reversed(range(T)):
+        return_ = rewards[t] + return_ * gamma
+
+        delta = gamma * values[t + 1] + float(rewards[t]) - values[t]
+        advantage = delta + advantage * gamma * lambda_
+
+        if dones[t]:
+            return_ = torch.zeros(1)
+            advantage = torch.zeros(1)
+
+        returns[t] = return_
+        advantages[t] = advantage
+
+    returns = torch.cat(returns)
+    advantages = torch.cat(advantages)
+    return returns, advantages
+
+class MPSwitch():
+
+    def __init__(self):
+        self._value = mp.Value("b", False)
+        self._lock = mp.Lock()
+
+    def get(self):
+        with self._lock:
+            return self._value.value
+
+    def set(self, value):
+        with self._lock:
+            self._value.value = value
+
+    def flip(self):
+        with self._lock:
+            self._value.value = not self._value.value
+
+class MPCounter():
+
+    def __init__(self):
+        self._value = mp.Value("i", 0)
+        self._lock = mp.Lock()
+
+    def get(self):
+        with self._lock:
+            return self._value.value
+
+    def increment(self):
+        with self._lock:
+            self._value.value += 1
+
+    def reset(self):
+        with self._lock:
+            self._value.value = 0
+
+def push_grads(src_model, dest_model):
+    dest_params = dict(dest_model.named_parameters())
+    for name, src_param in src_model.named_parameters():
+        dest_param = dest_params[name]
+        dest_param.grad.data.add_(src_param.grad.data)
