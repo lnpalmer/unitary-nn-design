@@ -17,7 +17,7 @@ W = 4
 T = W * 32
 D = 1
 M = 3
-timesteps = 1000000
+timesteps = 200000
 model_path = "designer_params"
 
 model = DesignerNetwork(N, I, O)

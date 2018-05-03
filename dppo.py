@@ -210,7 +210,7 @@ def ppo_objective(
         action_taken_probs,
         action_taken_probs_old,
         advantages,
-        clip=.1):
+        clip=.2):
         advantages = (advantages - advantages.mean()) / advantages.std()
 
         ratio = action_taken_probs / (action_taken_probs_old + 1e-8)

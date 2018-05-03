@@ -9,7 +9,7 @@ instrs = ["CON", "DISCON", "ADDUNIT", "DELUNIT", "NOOP"]
 
 class DesignerNetwork(nn.Module):
 
-    def __init__(self, N, I, O, S_example=10, S_phi=40, S_rho=40):
+    def __init__(self, N, I, O, S_example=10, S_phi=60, S_rho=60):
         super().__init__()
 
         self.N, self.I, self.O = N, I, O

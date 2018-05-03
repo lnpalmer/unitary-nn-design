@@ -88,7 +88,7 @@ class DAGNN(nn.Module):
     def delunit(self, i):
         N, I, O = self.N, self.I, self.O
 
-        if i < I or i >= N - O:
+        if i < I or i >= N - O or not self._graph.has_node(i):
             return False
         else:
             self._graph.remove_node(i)
