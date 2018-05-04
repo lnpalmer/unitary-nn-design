@@ -25,8 +25,8 @@ class DesignerNetwork(nn.Module):
             nn.Linear(S_phi + S_example * 2, S_rho))
 
         # global actor-critic outputs
-        self.fc_actor = nn.Linear(S_rho * 2, N_actions)
-        self.fc_critic = nn.Linear(S_rho * 2, 1)
+        self.fc_actor = nn.Linear(S_phi * 2, N_actions)
+        self.fc_critic = nn.Linear(S_phi * 2, 1)
 
         # unit role probabilities
         self.fc_units = nn.Linear(S_rho * 2, N_unit_roles)

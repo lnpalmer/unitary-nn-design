@@ -34,7 +34,7 @@ def draw_net(net, path):
 
     AG.draw(path, prog="neato")
 
-def gae(rewards, dones, values, gamma=0.99, lambda_=0.95):
+def gae(rewards, dones, values, gamma=0.98, lambda_=0.95):
     T = len(rewards)
 
     values = [value.detach().data for value in values]

@@ -28,7 +28,10 @@ This project attempts to extend the existing research in automatic design of neu
 The primary network is an unstructured feedforward neural network, a directed acyclic graph of neurons. Formally, the network has \(N\) units, each with a bias \(b_i\). The weight of a connection from unit \(j\) to unit \(i\) is noted as \(w_{ij}\). Weights \(w_{ij}\) can only exist for \(j < i\) to maintain the feedforward property of the network. List \(F_i\) contains the indices of the units that have forward connections into unit \(i\) in ascending order, and list \(B_i\) contains the indices of the units that have backward connections into unit \(i\) in descending order. The activation of unit \(i\) is calculated as follows, using some nonlinearity \(\phi\):
 
 \begin{equation}
-a_i = \phi(\sum_{j \in F_i}{w_{ij}a_{j}} + b_i)
+z_i = \sum_{j \in F_i}{w_{ij}a_{j}} + b_i
+\end{equation}
+\begin{equation}
+a_i = \phi(z_i)
 \end{equation}
 
 The first \(I\) units (\(1 \le i \le I\)) and last \(O\) units (\(N - O < i \le N\)) are the inputs and outputs of the network, respectively, so it can be used as a function \(\mathbb{R}^I \mapsto \mathbb{R}^O\). The activations of the input units are directly set to the input values, and the output units have no nonlinearity.
@@ -53,7 +56,9 @@ The designer agent is intended to tune the structure of the primary network duri
   \end{tabular}
 \end{center}
 
-Before the episode begins, the primary network is trained on a supervised learning task until test objective changes by less than some threshold \(\Delta_{warmup}\) between intervals of \(N_{mb}\) minibatches of size \(S_{mb}\) of training. At each timestep \(t\), the modification \(a_t\) is applied to the primary network, and it is trained for \(N_{mb}\) minibatches ending in primary network \(P_{t+1}\). The reward received at each timestep \(r(s_t, a_t, s_{t+1})\) is the change in primary objective on the test subset of \(\mathcal{D}\) from \(P_t\) to \(P_{t+1}\). At time \(t\) the designer agent makes an observation \(o_t\), the activations \(\alpha_i\) and objective gradients \(\delta_i\) of unit \(i\) for all units in the primary network's computation graph, for a minibatch of size \(S_{example}\) randomly sampled from \(\mathcal{D}\). An episode ends after \(N_{step}\) transitions or when the reward is less than \(-\Delta_{div}\), indicating that the primary network has diverged.
+Some actions are invalid, such as deleting one of the first \(I\) or last \(O\) units. Invalid actions are not applied, having the same effect as \(NOOP\) actions.
+
+Before the episode begins, the primary network is trained on a supervised learning task until test objective changes by less than some threshold \(\Delta_{warmup}\) between intervals of \(N_{mb}\) minibatches of size \(S_{mb}\) of training. At each timestep \(t\), the modification \(a_t\) is applied to the primary network, and it is trained for \(N_{mb}\) minibatches ending in primary network \(P_{t+1}\). The reward received at each timestep \(r(s_t, a_t, s_{t+1})\) is the change in primary objective on the test subset of \(\mathcal{D}\) from \(P_t\) to \(P_{t+1}\). At time \(t\) the designer agent makes an observation \(o_t\), the preactivations \(z_i\) and objective gradients of the preactivations \(\delta_i\) of unit \(i\) for all units in the primary network's computation graph, for a minibatch of size \(S_{example}\) randomly sampled from \(\mathcal{D}\). An episode ends after \(N_{step}\) transitions or when the reward is less than \(-\Delta_{div}\), indicating that the primary network has diverged.
 
 \subsection{Designer network}
 
@@ -83,13 +88,13 @@ In the edge case of an empty sequence, \(GRU(\cdot)\) returns the zero vector. \
   \ora{\phi}_i = GRU_{forward}(\ora{\rho}_{F_{i,1}}, \ldots, \ora{\rho}_{F_{i,|F_i|}})_{|F_i|}
 \end{equation}
 \begin{equation}
-  \ora{\rho}_i = FC_{forward}(cat(\ora{\phi}_i, \alpha_i, \delta_i))
+  \ora{\rho}_i = FC_{forward}(cat(\ora{\phi}_i, z_i, \delta_i))
 \end{equation}
 \begin{equation}
   \ola{\phi}_i = GRU_{backward}(\ola{\rho}_{B_{i,1}}, \ldots, \ola{\rho}_{B_{i,|B_i|}})_{|B_i|}
 \end{equation}
 \begin{equation}
-  \ola{\rho}_i = FC_{backward}(cat(\ola{\phi}_i, \alpha_i, \delta_i))
+  \ola{\rho}_i = FC_{backward}(cat(\ola{\phi}_i, z_i, \delta_i))
 \end{equation}
 
 For each unit \(i\), the forward and backward representations are used to calculate the logits \(\psi_i\) of the probabilities to use the unit for several roles:
@@ -179,7 +184,7 @@ The objective for a minibatch \(M\) is the average log-likelihood of emitting th
   \mathcal{L} = \frac{1}{|M|} \sum_{x, l \in M}\sum_o log(p(y_o = l_o | x))
 \end{equation}
 
-The designer agent is trained using Proximal Policy Optimization \cite{DBLP:journals/corr/SchulmanWDRK17}, with \(\epsilon\)-greedy action selection during training. The following network architectures are used:
+The designer agent is trained using Distributed Proximal Policy Optimization \cite{DBLP:journals/corr/HeessTSLMWTEWER17}, with \(\epsilon\)-greedy action selection during training. The following network architectures are used:
 
 \begin{itemize}
   \item{\(FC_{actor}\) and \(FC_{critic}\) shared a single hidden layer with 50 units.}

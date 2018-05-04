@@ -12,17 +12,17 @@ from adam_quickfix import SparseAdamQuickfixed
 
 # TODO cleanup name ambiguity: ACTION(i, j) vs. j, i from matrix standard
 
-N = 128
+N = 96
 I = 16
 O = 16
-H = 16
+H = 32
 
 train_size = 50000
 test_size = 10000
-bp_step_range = 32, 32
+bp_step_range = 16, 32
 lr=3e-3
 M = 100
-N_mb = 10
+N_mb = 20
 N_step = 1000
 delta_warmup = 1e-2
 S_example = 10 # TODO: rename
@@ -87,7 +87,7 @@ class DesignEnv(gym.Env):
         reward = self._get_reward(test_loss)
         done = abs(reward > 1e2) or self.age == N_step
 
-        return ob, reward, done, None
+        return ob, reward, done, test_loss
 
     def reset(self):
         self.age = 0

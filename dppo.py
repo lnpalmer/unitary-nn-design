@@ -17,6 +17,8 @@ class DPPO:
         self.W = kwargs["W"]
         self.D = kwargs["D"]
         self.M = kwargs["M"]
+        self.logger = kwargs["logger"]
+        self.value_coeff = kwargs["value_coeff"]
 
         self.step_counter = MPCounter()
         self.worker_counter = MPCounter()
@@ -47,7 +49,9 @@ class DPPO:
                     "clone_model": self.clone_model,
                     "step_counter": self.step_counter,
                     "worker_counter": self.worker_counter,
-                    "accepting_gradients": self.accepting_gradients})
+                    "accepting_gradients": self.accepting_gradients,
+                    "logger": self.logger,
+                    "value_coeff": self.value_coeff})
             process.start()
             processes.append(process)
 
@@ -83,6 +87,8 @@ def dppo_worker(**kwargs):
     step_counter = kwargs["step_counter"]
     worker_counter = kwargs["worker_counter"]
     accepting_gradients = kwargs["accepting_gradients"]
+    logger = kwargs["logger"]
+    value_coeff = kwargs["value_coeff"]
 
     model = clone_model(shared_model)
     model_old = clone_model(shared_model)
@@ -99,6 +105,7 @@ def dppo_worker(**kwargs):
         dones = []
         actions = []
         values = []
+        env_losses = []
 
         for i in range(T_worker):
             if done:
@@ -108,12 +115,13 @@ def dppo_worker(**kwargs):
 
             action_prob, value = model(ob)
             action = model.choose_action(action_prob, epsilon=.1)
-            ob, reward, done, _ = env.step(action)
+            ob, reward, done, env_loss = env.step(action)
 
             rewards.append(reward)
             dones.append(done)
             actions.append(action)
             values.append(value)
+            env_losses.append(env_loss)
 
         # get a final value to bootstrap returns with
         _, value = model(ob)
@@ -124,8 +132,12 @@ def dppo_worker(**kwargs):
         # perform optimization
         model_old.load_state_dict(model.state_dict())
 
-        if rank == 0:
-            print(f"@{(step_counter.get() // M) * T} average reward: {sum(rewards) / float(T_worker)}")
+        logger(
+            rank=rank,
+            rewards=rewards,
+            env_model=env.primary_network,
+            env_losses=env_losses,
+            timesteps_done=(step_counter.get() // M) * T)
 
         while True:
             step = step_counter.get()
@@ -156,7 +168,7 @@ def dppo_worker(**kwargs):
                 action_taken_probs_old,
                 advantages)
 
-            loss += (((values - returns) ** 2) / 2.).mean()
+            loss += value_coeff * (((values - returns) ** 2) / 2.).mean()
             loss.backward()
 
             if accepting_gradients.get():
@@ -172,6 +184,8 @@ def dppo_worker(**kwargs):
 
             if target_step % M == 0:
                 break
+
+        model.load_state_dict(shared_model.state_dict())
 
 
 def dppo_chief(**kwargs):
@@ -215,6 +229,6 @@ def ppo_objective(
 
         ratio = action_taken_probs / (action_taken_probs_old + 1e-8)
 
-        unclipped = ratio
-        clipped = torch.clamp(ratio, min=1. - clip, max=1. + clip)
-        return torch.min(unclipped, clipped).mean()
+        unclipped = ratio * advantages
+        clipped = torch.clamp(ratio, min=1. - clip, max=1. + clip) * advantages
+        return (torch.min(unclipped, clipped)).mean()
