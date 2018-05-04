@@ -187,12 +187,15 @@ The objective for a minibatch \(M\) is the average log-likelihood of emitting th
 The designer agent is trained using Distributed Proximal Policy Optimization \cite{DBLP:journals/corr/HeessTSLMWTEWER17}, with \(\epsilon\)-greedy action selection during training. The following network architectures are used:
 
 \begin{itemize}
-  \item{\(FC_{actor}\) and \(FC_{critic}\) shared a single hidden layer with 50 units.}
-  \item{\(FC_{forward}\) and \(FC_{backward}\) each had a single hidden layer with 40 units.}
-  \item{\(GRU_{forward}\) and \(GRU_{backward}\) each had a single recurrent layer with 60 units.}
+  \item{\(FC_{actor}\) and \(FC_{critic}\) were single fully connected layers.}
+  \item{\(FC_{forward}\) and \(FC_{backward}\) were single fully connected layers.}
+  \item{\(GRU_{forward}\) and \(GRU_{backward}\) each had a single recurrent layer.}
 \end{itemize}
 
-Adam \cite{DBLP:journals/corr/KingmaB14} is used to optimize both networks.
+\section{Current results (May 4 2018)}
+A designer agent was trained for 200000 timesteps, with \(S_{rho} = 60, S_{phi} = 60\), and DPPO params \(W = 11, D = 1, M = 3, T = 11 * 32\). Generalized advantage estimation \cite{DBLP:journals/corr/SchulmanMLJA15} was done with parameters \(\gamma = 0.98, \lambda = 0.95\). The environment pretrained the primary network with loss thresold \(\Delta_{warmup} = 1*10^{-2}\) used a training dataset of size 50000 and testing dataset of size 10000, training the primary network with \(N_{mb} = 20\) minibatches of size \(M = 100\) across steps for up to \(N_{step} = 1000\) steps. primary networks with \(I = 16, O = 16, N = 96\), and initialized them with \(H = 32\). The environment trained the  Adam \cite{DBLP:journals/corr/KingmaB14} was used to optimize both networks, with \(lr = 1*10^{-3}, \beta_1 = 0.9, \beta_2 = 0.999, \epsilon = 1*10^{-8}\) for the designer network and \(lr = 3*10^{-3}, \beta_1 = 0.9, \beta_2 = 0.999, \epsilon = 1*10^{-8}\) for the primary network. Binary programs were generated for the design environment with \(\mathcal{U}[16, 32]\) steps. The designer agent's average reward did not improve over time, and the primary network's test loss did not consistently decrease more than it did from the start of training the designer agent.
+
+Figures in the original Proximal Policy Optimization paper \cite{DBLP:journals/corr/SchulmanWDRK17} show that learning even in relatively simple environments like Atari Pong can take on the order of millions of timesteps, so it is not entirely surprising that the agent did not experience noticeable learning during training. On 11 cores, the code progressed at a rate of about 5 environment steps per second, making it difficult to run larger training trials and evaluate hyperparameters. More optimization needs to be done to facilitate further progress, specifically in the primary network which is the current bottleneck for training speed. Code for this project is hosted at \url{https://github.com/lnpalmer/unitary-nn-design}.
 
 \bibliography{unnd}{}
 \bibliographystyle{plain}
@@ -204,7 +207,7 @@ Adam \cite{DBLP:journals/corr/KingmaB14} is used to optimize both networks.
 
 \subsection{Primary network sampling}
 
-An uninitialized primary network contains \(N\) unconnected units, with the first \(I\) units used as the input and the last \(O\) units used as the output. A set of \(H\) hidden unit indices \(\mathcal{H}\) is randomly chosen from \((I, N - O]\). Each unit in \([1, I] \cup \mathcal{H}\) is connected forward to \(n_{f, i} \sim \mathcal{U}\{1, 4\}\) units with higher indices in \((N - O, N] \cup \mathcal{H}\). Additionally, each unit in \((N - O, N] \cup \mathcal{H}\) is connected backward to \(n_{b,i} \sim \mathcal{U}\{1, 4\}\) units with lower indices in \([1, I] \cup \mathcal{H}\). Units that do not feed forward into at least one output unit and propagate backward to at least one input unit, directly or indirectly, are 'removed' from the network by removing all of their inbound and outbound connections.
+An uninitialized primary network contains \(N\) unconnected units, with the first \(I\) units used as the input and the last \(O\) units used as the output. A set of \(H\) hidden unit indices \(\mathcal{H}\) is randomly chosen from \((I, N - O]\). Each unit in \([1, I] \cup \mathcal{H}\) is connected forward to \(n_{f, i} \sim \mathcal{U}\{1, 8\}\) units with higher indices in \((N - O, N] \cup \mathcal{H}\). Additionally, each unit in \((N - O, N] \cup \mathcal{H}\) is connected backward to \(n_{b,i} \sim \mathcal{U}\{1, 8\}\) units with lower indices in \([1, I] \cup \mathcal{H}\). Units that do not feed forward into at least one output unit and propagate backward to at least one input unit, directly or indirectly, are removed from the network.
 
 \subsection{Binary function sampling}
 
