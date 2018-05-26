@@ -1,5 +1,6 @@
 from math import sqrt
 import random
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Function
@@ -21,10 +22,10 @@ class DAGNN(nn.Module):
         self._graph = nx.DiGraph()
 
         for i in range(I):
-            self.populate(i, 0)
+            self.populate(i, 0.)
 
         for i in range(N - O, N):
-            self.populate(i, 0)
+            self.populate(i, 0.)
 
         # bare minimum W, updated immediately
         self.W = nn.Parameter(
@@ -95,18 +96,20 @@ class DAGNN(nn.Module):
             self.autoremove()
             return True
 
+    """ Update torch parameters from graphical network description. """
     def gen_parameters(self):
         N = self.N
 
         nodes = self._graph.nodes(data=True)
         edges = self._graph.edges(data=True)
 
-        b_new = torch.zeros(N)
+        b_new = np.zeros(N)
         for node in nodes:
             i, b_i = node
             b_i = b_i['b']
 
             b_new[i] = b_i
+        b_new = torch.Tensor(b_new)
 
         # HACK to avoid creating a new parameter, which disrupts optimizers
         self.b.data.zero_().add_(b_new)
@@ -130,9 +133,15 @@ class DAGNN(nn.Module):
 
         self._needs_gen = False
 
+    """ Update the graph representation to match the actual network parameters. """
     def sync_graph(self):
         if self._needs_gen:
             self.gen_parameters()
+
+        b = self.b.data.numpy()
+        for i in range(self.N):
+            if self._graph.has_node(i):
+                self._graph.add_node(i, b=b[i])
 
         W_i_T = self.W._indices().transpose(0, 1).detach().numpy()
         W_v = self.W._values().detach().numpy()

@@ -76,7 +76,6 @@ class DesignerNetwork(nn.Module):
         # take the union of the primary network graphs
         x_union = nx.DiGraph()
         for x_b in x:
-            print(type(x_b))
             x_union.add_nodes_from(x_b.nodes())
             x_union.add_edges_from(x_b.edges())
 
@@ -110,10 +109,6 @@ class DesignerNetwork(nn.Module):
                 rho_F_i_t = node_F_i_t['rho_forward']
                 h = interpolate(h, self.gru_forward(rho_F_i_t, h), has_F_i_t)
 
-            print("<< %i <<" % i)
-            print(h.size())
-            print(z_i.size())
-            print(dz_i.size())
             phi_i = h
             input = torch.cat([phi_i, z_i, dz_i], 1)
             rho_i = self.fc_forward(input)
@@ -166,7 +161,7 @@ class DesignerNetwork(nn.Module):
             if x_union.has_node(i):
                 return x_union.nodes[i]['has']
             else:
-                return torch.ones(B, 1)
+                return torch.zeros(B, 1)
 
         def get_psi(i):
             if x_union.has_node(i):
@@ -181,9 +176,11 @@ class DesignerNetwork(nn.Module):
 
         # prevent usage of nonexistant units
         psi = interpolate(-60., psi, has.unsqueeze(1))
+        # print(psi[:,:,40:45])
+        # print(has[:,40:45])
 
         instr_prob = Fnn.softmax(omega, dim=1)
-        role_prob = Fnn.softmax(psi, dim=1)
+        role_prob = Fnn.softmax(psi, dim=2)
 
         return (instr_prob, role_prob), value
 
@@ -264,9 +261,6 @@ class DesignerNetwork(nn.Module):
     def choose_action(self, action_prob, epsilon=0.):
         instr_prob, role_prob = action_prob
         instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
-        print("!!!!")
-        print(instr_prob.size())
-        print(role_prob.size())
 
         _, instr = torch.max(instr_prob, 0)
         instr = instr.detach().numpy()
@@ -277,14 +271,17 @@ class DesignerNetwork(nn.Module):
 
         if random.random() < epsilon:
             temp = role_prob[0, :].detach().numpy()
-            units = [i for i in range(self.N) if temp[i] > 1e-20]
+            units = [i for i in range(self.N) if temp[i] > 1e-10]
 
             instr = random.choice(instrs)
             if instr in ["CON", "DISCON", "ADDUNIT"]:
                 j = int(random.choice(units))
-                i = int(random.choice([i for i in units if i >= j]))
-
-                action = instr, j, i
+                i_units = [i for i in units if i > j]
+                if len(i_units) > 0:
+                    i = int(random.choice(i_units))
+                    action = instr, j, i
+                else:
+                    action = ("NOOP",)
 
             if instr == "DELUNIT":
                 action = instr, int(random.choice(units))
