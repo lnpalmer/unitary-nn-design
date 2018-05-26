@@ -103,3 +103,6 @@ def push_grads(src_model, dest_model):
     for name, src_param in src_model.named_parameters():
         dest_param = dest_params[name]
         dest_param.grad.data.add_(src_param.grad.data)
+
+def interpolate(a_0, a_1, b):
+    return a_0 * (1. - b) + a_1 * b

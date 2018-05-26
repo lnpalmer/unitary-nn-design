@@ -64,28 +64,9 @@ class DesignEnv(gym.Env):
         # train for N_mb minibatches
         test_loss = self._train()
 
-        # make observation of preactivations and their gradients for a small batch
-        self.primary_network.zero_grad()
-        idxs = np.arange(train_size)
-        np.random.shuffle(idxs)
-        idxs_ob = idxs[:S_example]
-        x_ob = self.x_train[idxs_ob]
-        z_ob = torch.cat([x_ob, torch.zeros(S_example, self.N - self.I)], 1)
-        z_ob.requires_grad_(True)
-        y_ob = self.y_train[idxs_ob]
-
-        loss = self._loss(z_ob, y_ob)
-        loss.backward()
-
-        z = z_ob.data.transpose(0, 1).contiguous()
-        dz = z_ob.grad.data.transpose(0, 1).contiguous()
-
-        ob = self.primary_network._graph.copy()
-        for i in ob.nodes():
-            ob.add_node(i, z=z[i].unsqueeze(0), dz=dz[i].unsqueeze(0))
-
         reward = self._get_reward(test_loss)
         done = abs(reward > 1e2) or self.age == N_step
+        ob = self._make_observation()
 
         return ob, reward, done, test_loss
 
@@ -121,27 +102,7 @@ class DesignEnv(gym.Env):
             test_loss = self._train()
             delta_loss = -self._get_reward(test_loss)
 
-        # make observation of preactivations and their gradients for a small batch
-        self.primary_network.zero_grad()
-        idxs = np.arange(train_size)
-        np.random.shuffle(idxs)
-        idxs_ob = idxs[:S_example]
-        x_ob = self.x_train[idxs_ob]
-        z_ob = torch.cat([x_ob, torch.zeros(S_example, self.N - self.I)], 1)
-        z_ob.requires_grad_(True)
-        y_ob = self.y_train[idxs_ob]
-
-        loss = self._loss(z_ob, y_ob)
-        loss.backward()
-
-        z = z_ob.data.transpose(0, 1).contiguous()
-        dz = z_ob.grad.data.transpose(0, 1).contiguous()
-
-        ob = self.primary_network._graph.copy()
-        for i in ob.nodes():
-            ob.add_node(i, z=z[i].unsqueeze(0), dz=dz[i].unsqueeze(0))
-
-        return ob
+        return self._make_observation()
 
     def _train(self):
         idxs = np.arange(train_size)
@@ -178,6 +139,29 @@ class DesignEnv(gym.Env):
             reward = - (test_loss - self.prev_loss)
         self.prev_loss = test_loss
         return reward
+
+    """ make observation of preactivations and their gradients for a small batch """
+    def _make_observation(self):
+        self.primary_network.zero_grad()
+        idxs = np.arange(train_size)
+        np.random.shuffle(idxs)
+        idxs_ob = idxs[:S_example]
+        x_ob = self.x_train[idxs_ob]
+        z_ob = torch.cat([x_ob, torch.zeros(S_example, self.N - self.I)], 1)
+        z_ob.requires_grad_(True)
+        y_ob = self.y_train[idxs_ob]
+
+        loss = self._loss(z_ob, y_ob)
+        loss.backward()
+
+        z = z_ob.data.transpose(0, 1).contiguous()
+        dz = z_ob.grad.data.transpose(0, 1).contiguous()
+
+        ob = self.primary_network._graph.copy()
+        for i in ob.nodes():
+            ob.add_node(i, z=z[i], dz=dz[i])
+
+        return ob
 
 register(
     id="unitary-design-v0",

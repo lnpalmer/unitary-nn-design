@@ -104,7 +104,7 @@ class DAGNN(nn.Module):
         b_new = torch.zeros(N)
         for node in nodes:
             i, b_i = node
-            b_i = b_i["b"]
+            b_i = b_i['b']
 
             b_new[i] = b_i
 
@@ -116,7 +116,7 @@ class DAGNN(nn.Module):
         w_pos = 0
         for edge in edges:
             j, i, w_ij = edge
-            w_ij = w_ij["weight"]
+            w_ij = w_ij['weight']
 
             W_i[0][w_pos] = i
             W_i[1][w_pos] = j

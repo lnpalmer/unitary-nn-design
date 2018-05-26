@@ -113,7 +113,7 @@ def dppo_worker(**kwargs):
 
             obs.append(ob)
 
-            action_prob, value = model(ob)
+            action_prob, value = model([ob])
             action = model.choose_action(action_prob, epsilon=.1)
             ob, reward, done, env_loss = env.step(action)
 
@@ -124,7 +124,7 @@ def dppo_worker(**kwargs):
             env_losses.append(env_loss)
 
         # get a final value to bootstrap returns with
-        _, value = model(ob)
+        _, value = model([ob])
         values.append(value)
 
         returns, advantages = gae(rewards, dones, values)
@@ -139,6 +139,7 @@ def dppo_worker(**kwargs):
             env_losses=env_losses,
             timesteps_done=(step_counter.get() // M) * T)
 
+        return
         while True:
             step = step_counter.get()
 

@@ -1,11 +1,39 @@
+import time
 import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fnn
+import networkx as nx
+
+from utils import interpolate
 
 N_actions = 5
 N_unit_roles = 7
 instrs = ["CON", "DISCON", "ADDUNIT", "DELUNIT", "NOOP"]
+
+def get_net_bias(net, i):
+    if net.has_node(i):
+        return net.nodes[i]['b']
+    else:
+        return 0.
+
+def get_net_weight(net, j, i):
+    if net.has_edge(j, i):
+        return net.edges[j, i]['weight']
+    else:
+        return 0.
+
+def get_net_z(net, i, S_example):
+    if net.has_node(i):
+        return net.nodes[i]['z']
+    else:
+        return torch.zeros(S_example)
+
+def get_net_dz(net, i, S_example):
+    if net.has_node(i):
+        return net.nodes[i]['dz']
+    else:
+        return torch.zeros(S_example)
 
 class DesignerNetwork(nn.Module):
 
@@ -15,12 +43,12 @@ class DesignerNetwork(nn.Module):
         self.N, self.I, self.O = N, I, O
         self.S_example, self.S_phi, self.S_rho = S_example, S_phi, S_rho
 
-        self.gru_forward = nn.GRU(S_rho, S_phi)
+        self.gru_forward = nn.GRUCell(S_rho, S_phi)
         self.fc_forward = nn.Sequential(
             nn.Linear(S_phi + S_example * 2, S_rho),
             nn.Tanh())
 
-        self.gru_backward = nn.GRU(S_rho, S_phi)
+        self.gru_backward = nn.GRUCell(S_rho, S_phi)
         self.fc_backward = nn.Sequential(
             nn.Linear(S_phi + S_example * 2, S_rho))
 
@@ -31,10 +59,135 @@ class DesignerNetwork(nn.Module):
         # unit role probabilities
         self.fc_units = nn.Linear(S_rho * 2, N_unit_roles)
 
-    def forward(self, x):
-        rho_forward = {}
-        rho_backward = {}
+    """
+    Forward pass for the designer network.
 
+    Args:
+        x:
+            A list (batch) of observations.
+            Observations are networkx.DiGraph instances, populated with a bias for each node where
+            applicable and neural network connections as edges,
+            with edge weights as the neural network weights.
+
+    """
+    def forward(self, x):
+        B = len(x)
+
+        # take the union of the primary network graphs
+        x_union = nx.DiGraph()
+        for x_b in x:
+            print(type(x_b))
+            x_union.add_nodes_from(x_b.nodes())
+            x_union.add_edges_from(x_b.edges())
+
+        # batch node data
+        for i in x_union.nodes():
+            has_i = torch.Tensor([float(x[b].has_node(i)) for b in range(B)]).unsqueeze(1)
+            b_i = torch.Tensor([get_net_bias(x[b], i) for b in range(B)]).unsqueeze(1)
+            z_i = torch.stack([get_net_z(x[b], i, self.S_example) for b in range(B)], 0)
+            dz_i = torch.stack([get_net_dz(x[b], i, self.S_example) for b in range(B)], 0)
+            x_union.add_node(i, has=has_i, b=b_i, z=z_i, dz=dz_i)
+
+        # batch edge data
+        for edge in x_union.edges():
+            j, i = edge
+            w_ij = torch.Tensor([get_net_weight(x[b], j, i) for b in range(B)]).unsqueeze(1)
+            has_ij = torch.Tensor([float(x[b].has_edge(j, i)) for b in range(B)]).unsqueeze(1)
+            x_union.add_edge(j, i, w=w_ij, has=has_ij)
+
+        # forward pass over the primary network
+        for i in sorted(x_union.nodes()):
+            node = x_union.nodes[i]
+            b_i = node['b']
+            z_i = node['z']
+            dz_i = node['dz']
+            F_i = sorted([edge[0] for edge in x_union.in_edges([i])])
+
+            h = torch.zeros(B, self.S_phi)
+            for F_i_t in F_i:
+                node_F_i_t = x_union.nodes[F_i_t]
+                has_F_i_t = node_F_i_t['has']
+                rho_F_i_t = node_F_i_t['rho_forward']
+                h = interpolate(h, self.gru_forward(rho_F_i_t, h), has_F_i_t)
+
+            print("<< %i <<" % i)
+            print(h.size())
+            print(z_i.size())
+            print(dz_i.size())
+            phi_i = h
+            input = torch.cat([phi_i, z_i, dz_i], 1)
+            rho_i = self.fc_forward(input)
+            x_union.nodes[i]['rho_forward'] = rho_i
+
+        # backward pass over the primary network
+        for i in reversed(sorted(x_union.nodes())):
+            node = x_union.nodes[i]
+            b_i = node['b']
+            z_i = node['z']
+            dz_i = node['dz']
+            B_i = reversed(sorted([edge[1] for edge in x_union.out_edges([i])]))
+
+            h = torch.zeros(B, self.S_phi)
+            for B_i_t in B_i:
+                node_B_i_t = x_union.nodes[B_i_t]
+                has_B_i_t = node_B_i_t['has']
+                rho_B_i_t= node_B_i_t['rho_backward']
+                h = interpolate(h, self.gru_backward(rho_B_i_t, h), has_B_i_t)
+
+            phi_i = h
+            input = torch.cat([phi_i, z_i, dz_i], 1)
+            rho_i = self.fc_backward(input)
+            x_union.nodes[i]['rho_backward'] = rho_i
+
+        # final forward output
+        h = torch.zeros(B, self.S_rho)
+        for i in range(self.N - self.O, self.N):
+            node_i = x_union.nodes[i]
+            has_i = node_i['has']
+            rho_i = node_i['rho_forward']
+            h = interpolate(h, self.gru_forward(rho_i, h), has_i)
+        alpha_forward = h
+
+        # final backward output
+        h = torch.zeros(B, self.S_rho)
+        for i in reversed(range(self.I)):
+            node_i = x_union.nodes[i]
+            has_i = node_i['has']
+            rho_i = node_i['rho_backward']
+            h = interpolate(h, self.gru_backward(rho_i, h), has_i)
+        alpha_backward = h
+
+        # general action logits
+        input = torch.cat([alpha_forward, alpha_backward], 1)
+        omega = self.fc_actor(input)
+        value = self.fc_critic(input)
+
+        def get_has(i):
+            if x_union.has_node(i):
+                return x_union.nodes[i]['has']
+            else:
+                return torch.ones(B, 1)
+
+        def get_psi(i):
+            if x_union.has_node(i):
+                node_i = x_union.nodes[i]
+                input = torch.cat([node_i['rho_forward'], node_i['rho_backward']], 1)
+                return self.fc_units(input)
+            else:
+                return torch.zeros(B, N_unit_roles)
+
+        has = torch.cat([get_has(i) for i in range(self.N)], 1)
+        psi = torch.stack([get_psi(i) for i in range(self.N)], 2)
+
+        # prevent usage of nonexistant units
+        psi = interpolate(-60., psi, has.unsqueeze(1))
+
+        instr_prob = Fnn.softmax(omega, dim=1)
+        role_prob = Fnn.softmax(psi, dim=1)
+
+        return (instr_prob, role_prob), value
+
+        """
         M = None
 
         # 'forward' pass
@@ -105,21 +258,25 @@ class DesignerNetwork(nn.Module):
         role_prob = Fnn.softmax(torch.stack(psi, 1), dim=1)
 
         return (instr_prob, role_prob), value
+        """
 
     """ Choose an action ϵ-greedily from instruction and unit role probabilities """
     def choose_action(self, action_prob, epsilon=0.):
         instr_prob, role_prob = action_prob
         instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
+        print("!!!!")
+        print(instr_prob.size())
+        print(role_prob.size())
 
         _, instr = torch.max(instr_prob, 0)
         instr = instr.detach().numpy()
         instr = instrs[instr]
 
-        _, roles = torch.max(role_prob, 0)
+        _, roles = torch.max(role_prob, 1)
         roles = roles.detach().numpy()
 
         if random.random() < epsilon:
-            temp = role_prob[:, 0].detach().numpy()
+            temp = role_prob[0, :].detach().numpy()
             units = [i for i in range(self.N) if temp[i] > 1e-20]
 
             instr = random.choice(instrs)
@@ -164,17 +321,17 @@ class DesignerNetwork(nn.Module):
             _, j, i = action
 
             if instr == "CON":
-                return instr_prob[0] * role_prob[j, 0] * role_prob[i, 1]
+                return instr_prob[0] * role_prob[0, j] * role_prob[1, i]
 
             if instr == "DISCON":
-                return instr_prob[1] * role_prob[j, 2] * role_prob[i, 3]
+                return instr_prob[1] * role_prob[2, j] * role_prob[3, i]
 
             if instr == "ADDUNIT":
-                return instr_prob[2] * role_prob[j, 4] * role_prob[i, 5]
+                return instr_prob[2] * role_prob[4, j] * role_prob[5, i]
 
         if instr == "DELUNIT":
             _, i = action
-            return instr_prob[3] * role_prob[i, 6]
+            return instr_prob[3] * role_prob[6, i]
 
         if instr == "NOOP":
             return instr_prob[4]
