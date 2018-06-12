@@ -64,11 +64,14 @@ class DesignerNetwork(nn.Module):
 
     Args:
         x:
-            A list (batch) of observations.
+            A list (batch) of B observations.
             Observations are networkx.DiGraph instances, populated with a bias for each node where
             applicable and neural network connections as edges,
             with edge weights as the neural network weights.
-
+    Returns: (instr_prob, role_prob), value
+        instr_prob: [B x N_actions] instruction probabilities
+        role_prob: [B x N_roles x number of units] unit role probabilities
+        value: [B x 1] state value estimate
     """
     def forward(self, x):
         B = len(x)
@@ -176,86 +179,11 @@ class DesignerNetwork(nn.Module):
 
         # prevent usage of nonexistant units
         psi = interpolate(-60., psi, has.unsqueeze(1))
-        # print(psi[:,:,40:45])
-        # print(has[:,40:45])
 
         instr_prob = Fnn.softmax(omega, dim=1)
         role_prob = Fnn.softmax(psi, dim=2)
 
         return (instr_prob, role_prob), value
-
-        """
-        M = None
-
-        # 'forward' pass
-        for node in sorted(x.nodes(data=True), key=lambda x: x[0]):
-            i, props = node
-
-            # get minibatch size (should be 1)
-            if not M:
-                M = props["dz"].size()[0]
-
-            F_i = sorted([edge[0] for edge in x.in_edges([i])])
-            if len(F_i) > 0:
-                input = torch.stack([rho_forward[j] for j in F_i], 0)
-                _, phi_forward_i = self.gru_forward(input)
-                phi_forward_i = phi_forward_i.squeeze(0)
-            else:
-                phi_forward_i = torch.zeros(M, self.S_phi)
-
-            input = torch.cat([
-                phi_forward_i,
-                props["z"],
-                props["dz"]], 1)
-            rho_forward[i] = self.fc_forward(input)
-
-        # 'backward' pass
-        for node in sorted(x.nodes(data=True), key=lambda x: x[0], reverse=True):
-            j, props = node
-
-            B_j = sorted([edge[1] for edge in x.out_edges([j])], reverse=True)
-            if len(B_j) > 0:
-                input = torch.stack([rho_backward[i] for i in B_j], 0)
-                _, phi_backward_j = self.gru_backward(input)
-                phi_backward_j = phi_backward_j.squeeze(0)
-            else:
-                phi_backward_j = torch.zeros(M, self.S_phi)
-
-            input = torch.cat([
-                phi_backward_j,
-                props["z"],
-                props["dz"]], 1)
-            rho_backward[j] = self.fc_backward(input)
-
-        N, I, O = self.N, self.I, self.O
-
-        # calculate final forward and backward representations
-        input = torch.stack([rho_forward[i] for i in range(N - O, N)], 0)
-        _, alpha_forward = self.gru_forward(input)
-        alpha_forward = alpha_forward.squeeze(0)
-        input = torch.stack([rho_backward[i] for i in range(I - 1, -1, -1)], 0)
-        _, alpha_backward = self.gru_backward(input)
-        alpha_backward = alpha_backward.squeeze(0)
-
-        # global results
-        input = torch.cat([alpha_forward, alpha_backward], 1)
-        omega = self.fc_actor(input)
-        value = self.fc_critic(input)
-
-        # unit results
-        psi = [None] * N
-        for i in range(N):
-            if i in rho_forward.keys():
-                input = torch.cat([rho_forward[i], rho_backward[i]], 1)
-                psi[i] = self.fc_units(input)
-            else:
-                psi[i] = torch.ones(M, N_unit_roles) * -60.
-
-        instr_prob = Fnn.softmax(omega, dim=1)
-        role_prob = Fnn.softmax(torch.stack(psi, 1), dim=1)
-
-        return (instr_prob, role_prob), value
-        """
 
     """ Choose an action ϵ-greedily from instruction and unit role probabilities """
     def choose_action(self, action_prob, epsilon=0.):
@@ -306,29 +234,69 @@ class DesignerNetwork(nn.Module):
                 action = (instr,)
 
         return action
+    
+    """
+    Gets the probability of taking an action given probabilities
 
-    """ The probability of taking an action given probabilities """
+    Args:
+        prob: (instr_prob, role_prob)
+            instr_prob: [B x N_actions] instruction probabilities
+            role_prob: [B x N_roles x number of units] unit role probabilities
+        action: list of B actions sampled
+    Returns:
+        action_prob: [B] action probabilities
+    """
     def prob_action(self, prob, action):
         instr_prob, role_prob = prob
-        instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
 
-        instr = action[0]
+        B = len(action)
+        action_prob = [None] * B
+        for b in range(B):
+            instr = action[b][0]
 
-        if instr in ["CON", "DISCON", "ADDUNIT"]:
-            _, j, i = action
+            if instr in ["CON", "DISCON", "ADDUNIT"]:
+                _, j, i = action[b]
 
-            if instr == "CON":
-                return instr_prob[0] * role_prob[0, j] * role_prob[1, i]
+                if instr == "CON":
+                    action_prob[b] = instr_prob[b, 0] * role_prob[b, 0, j] * role_prob[b, 1, i]
 
-            if instr == "DISCON":
-                return instr_prob[1] * role_prob[2, j] * role_prob[3, i]
+                if instr == "DISCON":
+                    action_prob[b] = instr_prob[b, 1] * role_prob[b, 2, j] * role_prob[b, 3, i]
+                
+                if instr == "ADDUNIT":
+                    action_prob[b] = instr_prob[b, 2] * role_prob[b, 4, j] * role_prob[b, 5, i]
+                
+            if instr == "DELUNIT":
+                _, i = action[b]
+                action_prob[b] = instr_prob[b, 3] * role_prob[b, 6, i]
+            
+            if instr == "NOOP":
+                action_prob[b] = instr_prob[b, 4]
+        
+        return torch.stack(action_prob, 0).unsqueeze(1)
 
-            if instr == "ADDUNIT":
-                return instr_prob[2] * role_prob[4, j] * role_prob[5, i]
+    # """ The probability of taking an action given probabilities """
+    # def prob_action(self, prob, action):
+    #     instr_prob, role_prob = prob
+    #     instr_prob, role_prob = instr_prob.squeeze(0), role_prob.squeeze(0)
 
-        if instr == "DELUNIT":
-            _, i = action
-            return instr_prob[3] * role_prob[6, i]
+    #     instr = action[0]
 
-        if instr == "NOOP":
-            return instr_prob[4]
+    #     if instr in ["CON", "DISCON", "ADDUNIT"]:
+    #         _, j, i = action
+
+    #         if instr == "CON":
+    #             return instr_prob[0] * role_prob[0, j] * role_prob[1, i]
+
+    #         if instr == "DISCON":
+    #             return instr_prob[1] * role_prob[2, j] * role_prob[3, i]
+
+    #         if instr == "ADDUNIT":
+    #             return instr_prob[2] * role_prob[4, j] * role_prob[5, i]
+
+    #     if instr == "DELUNIT":
+    #         _, i = action
+    #         return instr_prob[3] * role_prob[6, i]
+
+    #     if instr == "NOOP":
+    #         return instr_prob[4]

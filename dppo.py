@@ -139,7 +139,6 @@ def dppo_worker(**kwargs):
             env_losses=env_losses,
             timesteps_done=(step_counter.get() // M) * T)
 
-        return
         while True:
             step = step_counter.get()
 
@@ -148,21 +147,9 @@ def dppo_worker(**kwargs):
             model.zero_grad()
             model_old.zero_grad()
 
-            action_taken_probs = [None] * T_worker
-            action_taken_probs_old = [None] * T_worker
-            values = [None] * T_worker
-            for t in range(T_worker):
-                ob, action = obs[t], actions[t]
-
-                action_prob, values[t] = model(ob)
-                action_taken_probs[t] = model.prob_action(action_prob, action)
-
-                action_prob_old, _ = model_old(ob)
-                action_taken_probs_old[t] = model.prob_action(action_prob_old, action).detach()
-
-            action_taken_probs = torch.stack(action_taken_probs).unsqueeze(1)
-            action_taken_probs_old = torch.stack(action_taken_probs_old).unsqueeze(1)
-            values = torch.cat(values)
+            action_prob, values = model(obs)
+            action_taken_probs = model.prob_action(action_prob, actions)
+            action_taken_probs_old = model_old.prob_action(action_prob, actions).detach()
 
             loss = -ppo_objective(
                 action_taken_probs,
