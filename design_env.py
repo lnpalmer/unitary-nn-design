@@ -9,6 +9,7 @@ import torch.optim as optim
 from dagnn import gen_dagnn
 from binary import gen_binary_program
 from adam_quickfix import SparseAdamQuickfixed
+from rank import Rank
 
 # TODO cleanup name ambiguity: ACTION(i, j) vs. j, i from matrix standard
 
@@ -19,7 +20,7 @@ H = 32
 
 train_size = 50000
 test_size = 10000
-bp_step_range = 16, 32
+bp_step_range = 12, 60
 lr=3e-3
 M = 100
 N_mb = 20
@@ -44,7 +45,7 @@ class DesignEnv(gym.Env):
             _, i, j = action
 
             if instr == "CON":
-                self.primary_network.connect(i, j, random.gauss(0, 1))
+                connected = self.primary_network.connect(i, j, random.gauss(0, 1))
 
             if instr == "DISCON":
                 self.primary_network.disconnect(i, j)
@@ -65,7 +66,7 @@ class DesignEnv(gym.Env):
         test_loss = self._train()
 
         reward = self._get_reward(test_loss)
-        done = abs(reward > 1e2) or self.age == N_step
+        done = abs(reward) < -10 or self.age == N_step
         ob = self._make_observation()
 
         return ob, reward, done, test_loss

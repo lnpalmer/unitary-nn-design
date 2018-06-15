@@ -119,3 +119,6 @@ def static_var(varname, value):
         setattr(func, varname, value)
         return func
     return decorate
+
+def pad_str(s, target_len, padding=" "):
+    return s + padding * (target_len - len(s))

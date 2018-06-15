@@ -5,6 +5,7 @@ import torch.multiprocessing as mp
 import gym
 
 from utils import gae, MPSwitch, MPCounter, push_grads, draw_net, log_param_stats
+from rank import Rank
 
 class DPPO:
 
@@ -77,6 +78,7 @@ class DPPO:
 
 def dppo_worker(**kwargs):
     rank = kwargs["rank"]
+    Rank.set(rank)
     timesteps = kwargs["timesteps"]
     env_name = kwargs["env_name"]
     T = kwargs["T"]
@@ -114,8 +116,10 @@ def dppo_worker(**kwargs):
             obs.append(ob)
 
             action_prob, value = model([ob])
-            action = model.choose_action(action_prob, epsilon=.1)
+            action = model.choose_action(action_prob, epsilon=.2)
             ob, reward, done, env_loss = env.step(action)
+            if rank == 0:
+                print(action)
 
             rewards.append(reward)
             dones.append(done)
@@ -132,14 +136,8 @@ def dppo_worker(**kwargs):
         # perform optimization
         model_old.load_state_dict(model.state_dict())
 
-        logger(
-            rank=rank,
-            rewards=rewards,
-            env_model=env.primary_network,
-            env_losses=env_losses,
-            agent_model=shared_model,
-            timesteps_done=(step_counter.get() // M) * T,
-            sample_action_prob=action_prob)
+        # hold on to action_prob for logger (dirty!)
+        logger_action_prob = action_prob
 
         while True:
             step = step_counter.get()
@@ -178,6 +176,15 @@ def dppo_worker(**kwargs):
                 break
 
         model.load_state_dict(shared_model.state_dict())
+
+        logger(
+            rank=rank,
+            rewards=rewards,
+            env_model=env.primary_network,
+            env_losses=env_losses,
+            agent_model=shared_model,
+            timesteps_done=(step_counter.get() // M) * T,
+            sample_action_prob=logger_action_prob)
 
 torch.nn.Parameter
 
@@ -219,7 +226,7 @@ def ppo_objective(
         action_taken_probs,
         action_taken_probs_old,
         advantages,
-        clip=.2):
+        clip=.1):
         advantages = (advantages - advantages.mean()) / advantages.std()
 
         ratio = action_taken_probs / (action_taken_probs_old + 1e-8)

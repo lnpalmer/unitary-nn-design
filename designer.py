@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as Fnn
 import networkx as nx
 
-from utils import interpolate, log_param_stats
+from utils import interpolate, log_param_stats, pad_str
 
 N_actions = 5
 N_unit_roles = 7
@@ -19,7 +19,7 @@ def info_action_prob(action_prob, num_top_roles=5):
     print(", ".join(["%s: %f" % (instr, instr_prob[i]) for i, instr in enumerate(instrs)]))
     sort_args = np.argsort(role_prob, axis=1)
     for i, role_name in enumerate(role_names):
-        print("Top candidates for %s: %s" % (role_name, str(sort_args[i,::-1][:num_top_roles])[1:-1]))
+        print(pad_str("Top candidates for " + role_name + ":", 36) + np.array_str(sort_args[i,::-1][:num_top_roles])[1:-1])
 
 def get_net_bias(net, i):
     if net.has_node(i):

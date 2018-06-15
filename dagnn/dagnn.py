@@ -54,7 +54,7 @@ class DAGNN(nn.Module):
     def connect(self, j, i, w_ij):
         N, I, O = self.N, self.I, self.O
 
-        if self._graph.has_edge(j ,i) or i <= j or i < I and j < I or i >= N - O and j >= N - O:
+        if self._graph.has_edge(j, i) or i <= j or (i < I and j < I) or (i >= N - O and j >= N - O):
             return False
         else:
             self._graph.add_edge(j, i, weight=w_ij)
