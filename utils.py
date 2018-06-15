@@ -34,7 +34,7 @@ def draw_net(net, path):
 
     AG.draw(path, prog="neato")
 
-def gae(rewards, dones, values, gamma=0.98, lambda_=0.95):
+def gae(rewards, dones, values, gamma=0.99, lambda_=0.95):
     T = len(rewards)
 
     values = [value.detach().data for value in values]
@@ -106,3 +106,16 @@ def push_grads(src_model, dest_model):
 
 def interpolate(a_0, a_1, b):
     return a_0 * (1. - b) + a_1 * b
+
+def log_param_stats(name, param, grad=False):
+    message = "%s: mean: %f, std: %f" % (name, param.data.mean(), param.data.std())
+    if grad:
+        message += ", grad mean: %f, grad std: %f" % (param.grad.data.mean(), param.grad.data.std())
+    print(message)
+
+# From https://stackoverflow.com/questions/279561/what-is-the-python-equivalent-of-static-variables-inside-a-function
+def static_var(varname, value):
+    def decorate(func):
+        setattr(func, varname, value)
+        return func
+    return decorate

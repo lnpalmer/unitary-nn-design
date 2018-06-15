@@ -4,7 +4,7 @@ import torch
 import torch.multiprocessing as mp
 import gym
 
-from utils import gae, MPSwitch, MPCounter, push_grads, draw_net
+from utils import gae, MPSwitch, MPCounter, push_grads, draw_net, log_param_stats
 
 class DPPO:
 
@@ -137,7 +137,9 @@ def dppo_worker(**kwargs):
             rewards=rewards,
             env_model=env.primary_network,
             env_losses=env_losses,
-            timesteps_done=(step_counter.get() // M) * T)
+            agent_model=shared_model,
+            timesteps_done=(step_counter.get() // M) * T,
+            sample_action_prob=action_prob)
 
         while True:
             step = step_counter.get()
@@ -149,7 +151,9 @@ def dppo_worker(**kwargs):
 
             action_prob, values = model(obs)
             action_taken_probs = model.prob_action(action_prob, actions)
-            action_taken_probs_old = model_old.prob_action(action_prob, actions).detach()
+
+            action_prob_old, _ = model_old(obs)
+            action_taken_probs_old = model_old.prob_action(action_prob_old, actions).detach()
 
             loss = -ppo_objective(
                 action_taken_probs,
@@ -175,6 +179,7 @@ def dppo_worker(**kwargs):
 
         model.load_state_dict(shared_model.state_dict())
 
+torch.nn.Parameter
 
 def dppo_chief(**kwargs):
     timesteps = kwargs["timesteps"]
@@ -198,9 +203,11 @@ def dppo_chief(**kwargs):
 
             accepting_gradients.set(False)
 
-            for param in shared_model.parameters():
+            for name, param in shared_model.named_parameters():
+                # print("%s: mean %f, std %f" % (name, param.data.mean(), param.data.std()))
+                # print("%s.grad: mean %f, std %f" % (name, param.grad.data.mean(), param.grad.data.std()))
                 param.grad.data.div_(worker_counter.get())
-
+            
             optimizer.step()
 
             shared_model.zero_grad()

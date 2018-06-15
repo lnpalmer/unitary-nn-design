@@ -1,15 +1,25 @@
 import time
 import random
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as Fnn
 import networkx as nx
 
-from utils import interpolate
+from utils import interpolate, log_param_stats
 
 N_actions = 5
 N_unit_roles = 7
 instrs = ["CON", "DISCON", "ADDUNIT", "DELUNIT", "NOOP"]
+role_names = ["CON FROM", "CON TO", "DISCON FROM", "DISCON TO", "ADDUNIT FROM", "ADDUNIT TO", "DELUNIT"]
+
+def info_action_prob(action_prob, num_top_roles=5):
+    instr_prob, role_prob = action_prob
+    instr_prob, role_prob = instr_prob.squeeze(0).data.numpy(), role_prob.squeeze(0).data.numpy()
+    print(", ".join(["%s: %f" % (instr, instr_prob[i]) for i, instr in enumerate(instrs)]))
+    sort_args = np.argsort(role_prob, axis=1)
+    for i, role_name in enumerate(role_names):
+        print("Top candidates for %s: %s" % (role_name, str(sort_args[i,::-1][:num_top_roles])[1:-1]))
 
 def get_net_bias(net, i):
     if net.has_node(i):
@@ -58,6 +68,12 @@ class DesignerNetwork(nn.Module):
 
         # unit role probabilities
         self.fc_units = nn.Linear(S_rho * 2, N_unit_roles)
+
+        for name, param in self.named_parameters():
+            if param.dim() >= 2:
+                nn.init.xavier_uniform_(param.data)
+            if param.dim() == 1:
+                nn.init.normal_(param.data)
 
     """
     Forward pass for the designer network.
