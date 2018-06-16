@@ -4,8 +4,8 @@ Unitary Neural Network Design
 ## Running
 Install dependencies:
 ```shell
-apt install graphviz-dev
-pip install pygraphviz gym torch==0.4.0
+apt install graphviz-dev pkg-config
+pip install pygraphviz gym networkx torch==0.4.0
 ```
 
 Install the PyTorch extension for the primary network:
